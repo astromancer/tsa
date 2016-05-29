@@ -1,5 +1,9 @@
+#
+import warnings
+from copy import copy
+import itertools as itt
+
 import numpy as np
-import multiprocessing as mp
 
 #import scipy as sp
 from scipy.fftpack import rfftfreq, fft
@@ -8,38 +12,43 @@ from scipy.signal import lombscargle
 
 #from pynfft import NFFT, Solver
 
-from copy import copy
 
-import itertools as itt
+#from myio import warn
+#from magic.dict import TransDict
 
-from myio import warn
-from magic.dict import TransDict
-from .tsa import Div, detrend, fill_gaps, get_deltat_mode
+from .tsa import WindowedArrayFolder as af
+from .tsa import fill_gaps, get_deltat, get_deltat_mode
+from .    import detrending
 
 from IPython import embed
 
 #====================================================================================================
-def FFTpower(y, norm=0, dtrend=None):
-    ''' fft computing and normalization '''
-    if dtrend:
-        y = detrend(y, dtrend)
+def FFTpower(y, norm=0, detrend=()):
+    '''Compute FFT power. optionally normalize and or detrend'''
     
-    sp = abs( np.fft.rfft(y) ) ** 2     #Power
+    y = detrending.detrend(y, *detrend)
+    
+    sp = abs(np.fft.rfft(y)) ** 2     #Power
+    
     if norm:
         sp /= sp.sum()
+    
     return sp
     
-        
+periodogram = FFTpower
+
+
 #====================================================================================================
-def FTspectra(data, dtrend=None):
+def FTspectra(data, detrend=None):
     '''
     Single-Sided Amplitude Spectrum of y(t). Multiprocessing implimentation 
     NOTE: This assumes evenly sampled data!
     '''
-    func = functools.partial( FFT, dtrend=dtrend )
+    import multiprocessing as mp
+    func = functools.partial(FFTpower, detrend=detrend)
     
     pool = mp.Pool()
-    specs = pool.map( func, data )
+    specs = pool.map(func, data)
     pool.close()
     pool.join()
     
@@ -76,20 +85,20 @@ def NFFTspect(nodes, values, N, M):
 
 
 ##############################################################################################################################################
-class SpectralDataWrapper(object):
-    #====================================================================================================
-    def __init__(self):
-         self.f = []
-         self.A = []
-         self.signif = []
+#class SpectralDataWrapper(object):
+    ##====================================================================================================
+    #def __init__(self):
+         #self.f = []
+         #self.A = []
+         #self.signif = []
     
-    #====================================================================================================
-    def __getitem__(self, key):
-        return self.f[key], self.A[key], self.signif[key]
+    ##====================================================================================================
+    #def __getitem__(self, key):
+        #return self.f[key], self.A[key], self.signif[key]
             
-    #====================================================================================================
-    def __setitem__(self, key, vals):   
-        self.f[key], self.A[key], self.signif[key] = vals
+    ##====================================================================================================
+    #def __setitem__(self, key, vals):   
+        #self.f[key], self.A[key], self.signif[key] = vals
 
 ##############################################################################################################################################
 class Spectral(object):
@@ -117,11 +126,25 @@ class Spectral(object):
         
     #====================================================================================================
     def __init__(self, t, signal, **kw):
-        '''Do a LS spectral density map.   
-        If 'split' is a number, split the sequence into that number of roughly equal portions.
-        If split is a list, split the array according to the indeces in that list.'''
-        print( 'Spectral.compute' )
+        #TODO: update docstring
+        '''
+        Compute frequency power spectrum or Time Frequency representation (TFR).
+        Parameters
+        ----------
+        t       :       array-like
+            time
+        signal  :       array-like
+            values for which to compute power spectrum / TFR
+            
+        If 'split' is a number, split the sequence into that number of roughly
+        equal portions. If split is a list, split the array according to the
+        indeces in that list.
+        '''
+        #print( 'Spectral.compute' )
         #print( kw )
+        
+        assert len(t) == len(signal)
+        #print(len(signal))
         
         #Check acceptable keyword combinations
         #allkeys = kw.keys()
@@ -166,7 +189,7 @@ class Spectral(object):
         use =           kw.setdefault( 'use',           'fft'           )
         timescale =     kw.setdefault( 'timescale',     's'             )          #the timescale of the passed time variable.  Will be used to convert to s timescale.
         split =         kw.setdefault( 'split',         None            )
-        dtrend =        kw.setdefault( 'detrend',       None            )       
+        detrend =       kw.setdefault( 'detrend',       ()              )
         pad =           kw.setdefault( 'pad',           'symmetric'     )        #'constant', 'mean', ,'median', 'minimum', 'maximum', 'reflect', 'symmetric', 'wrap', 'linear_ramp', 'edge' 
         gaps =          kw.setdefault( 'gaps',          None            )        #tuple with fill method and option
         window =        kw.setdefault( 'window',        'boxcar'        )
@@ -181,14 +204,42 @@ class Spectral(object):
         #print( kw )
         
         if kct is None:
-            warn( 'Determining KCT from time-step mode stat.' )
-            kct = get_deltat_mode( t )
+            #warn( 'Determining KCT from time-step mode stat.' )
+            #try:
+                #dt = get_deltat(t)[1:]
+            #except IndexError:
+                #embed()
+            dt = get_deltat(t)[1:]
+            if np.allclose(dt, dt[0]):          #constant time steps
+                kct = dt[0]
+            else:                               #non-constant time steps!
+                unqdt = np.unique(dt)
+                kct = get_deltat_mode(t)
+                warnings.warn(('Non-constant time steps \n{}\n '
+                               'Assuming KCT is time-step mode: {}.'
+                               ''.format(unqdt, kct)))
+                
         
         #if (use.lower() in ('fft', 'fourier') or not gaps is None) and kct is None:
             #kct = Spectral.get_delta( t )
             #desc = 'FFT analysis' if use.lower in ('fft', 'fourier') else 'Gap detection'
             #warn('{} analysis requested, no KCT supplied.  KCT={} assumed from the most frequently occuring time delta (mode)...'.format(desc, kct))
-            
+        
+        #Fill data gaps 
+        #NOTE: we have to do this before allocating nwindow since len(t) changes
+        if gaps:
+            fillmethod, option = gaps
+            #print( fillmethod, option )
+            t, signal = fill_gaps(t, signal, kct, fillmethod, option)
+
+        elif np.ma.is_masked(signal):
+            warnings.warn( 'Removing masked values from signal!  This may not be a good idea...' )
+            t = t[~signal.mask]
+            signal = signal[~signal.mask]
+        
+        assert len(t) == len(signal)
+        #print(len(signal))
+        
         if nwindow is None:
             if split is None:
                 nwindow = len(t)                #No segmentation
@@ -213,18 +264,10 @@ class Spectral(object):
         elif timescale=='s':
             conv_fact = 1
         
-        #Fill data gaps
-        if gaps:
-            fillmethod, option = gaps
-            print( fillmethod, option )
-            t, signal = fill_gaps(t, signal, kct, fillmethod, option)
-        elif np.ma.is_masked(signal):
-            warn( 'Removing masked values' )
-            t = t[~signal.mask]
-            signal = signal[~signal.mask]
+
             
         #====================================================================================================
-        print( nwindow, noverlap )
+        #print( nwindow, noverlap )
         
         segments, Power = [], []
         
@@ -232,14 +275,16 @@ class Spectral(object):
             step = nwindow - noverlap
             leftover = (len(t)-noverlap) % step
             end_time = t[-1] + kct * (step-leftover) ,
-            self.t_seg = Div.div( t, nwindow, noverlap, 
+            self.t_seg = af.fold(t, nwindow, noverlap, 
                                   pad='linear_ramp', 
                                   end_values=end_time )
-            self.raw_seg = Div.div( signal,  nwindow, noverlap, window=window ) #padding will happen below
+            self.raw_seg = af.fold(signal,  nwindow, noverlap, window=window) #padding will happen below
         else:
-            self.t_seg             = np.split(t, split)
+            self.t_seg          = np.split(t, split)
             self.raw_seg        = np.split(signal, split)
-
+        
+        #print(self.t_seg.shape[1], len(t), nwindow        )
+        
         self.tms = np.median( self.t_seg, 1 )                #mid time for each section
         
         #FFT frequencies
@@ -253,23 +298,29 @@ class Spectral(object):
                 self.frq = f = f[1:]
         self.ohm = 2*np.pi*f         #angular frequencies
         
+        
+        
         #TODO: MULIPROCESS!
-        for t_s, seg in zip(self.t_seg, self.raw_seg):
+        for i, (t_s, seg) in enumerate(zip(self.t_seg, self.raw_seg)):
             
             t = (t_s - t_s[0]) * conv_fact                                                 #time in seconds          #NOTE:  THESE CONVERSION VALUES WILL CHANGE DEPENDING ON THE TIME VARIABLE PASSED TO  ls()
             #T = t[-1]  #length of this segment in sec
-            seg = detrend( seg, dtrend, t, preserve_energy=False )
+            if 'poly' in detrend:
+                dtrend = detrend + (t,)
+            
+            seg = detrending.detrend(seg, *detrend, preserve_energy=False)
             #NOTE THAT OUTLIERS WILL ADVERSELY INFLUENCE POLINOMIAL DETRENDING!!!!
             #print( seg )
             
             if apodise:                 #pad each segment so that it ends up being this size
                 #TODO: MOVE OUT OF LOOP
                 div, mod = divmod(apodise - len(t), 2)
-                padwidth = (div, div+mod)   
+                padwidth = (div, div + mod)
                 
                 #embed()
                 
-                seg = np.pad( seg, (div, div+mod), mode='constant', constant_values=0 )
+                seg = np.pad(seg, (div, div+mod), 
+                             mode='constant', constant_values=0 )
             
             #print( 'Calculating ls for section {}: t in [{},{}]'.format(i, t_s[0], t_s[-1])  )
             
@@ -279,7 +330,7 @@ class Spectral(object):
                 #P = np.r_[np.nan, P]    #DC signal cannot be measure by LS
                 
             if use.lower() in ('fft', 'fourier'):
-                P = FFTpower( seg, norm=False, dtrend=False )
+                P = FFTpower(seg, norm=False)
             
             #FIXME: appending is SLOWWWWWWWWW
             segments.append( seg )
@@ -330,11 +381,29 @@ class Spectral(object):
 
     #====================================================================================================
     def __iter__(self):
-        return self.frq, self.power#, self.segments
+        '''enable use case: f, P = Spectral(t, s)'''
+        return iter((self.frq, self.power))
 
         
 
-
+def normalizer(power, how, kct=None):
+    #TODO:
+    if not isinstance(how, str):
+        raise ValueError
+        
+    how = how.lower()
+    Nph = np.c_[ self.raw_seg.sum(1) ]
+    #Nph = signal.sum()                 #N_{\gamma} in Leahy 83 = DC component of FFT
+    #N = len(signal)
+    T = nwindow * kct
+    if how=='leahy':
+        return 2 * power / Nph
+    
+    elif how=='leahy density':
+        return 2 * T * power / Nph
+    
+    elif how=='rms':
+       return 2 * T * power / Nph**2
 
         
         
@@ -351,7 +420,7 @@ class Spectral(object):
     #if not np.ma.is_masked(x):
         #x = np.ma.array(x, mask=np.isnan(x))
         
-    #sections = Div.div( x, nwindow, noverlap )
+    #sections = af.fold( x, nwindow, noverlap )
     #filtered_data = []
     #for i, sec in enumerate(sections):
         

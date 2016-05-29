@@ -1,7 +1,5 @@
 import numpy as np
 import numpy.linalg as la
-import numpy.core.numeric as _nx
-from numpy.lib.stride_tricks import as_strided
 
 import scipy as sp
 import scipy.signal
@@ -14,29 +12,41 @@ from misc import flatten, accordion, lmap, count_repeats, sortmore
 from IPython import embed
 
 #====================================================================================================
-def get_deltat( t, kct=None ):
-    deltat = t - np.roll(t,1)
-    deltat[0] = kct  #set the first value to the kinetic cycle time if available
+def get_deltat(t, kct=None):
+    '''compute 1st order discrete difference (time steps). set value of the
+    first time step if known.'''
+    deltat = t - np.roll(t,1)           #FIXME: np.diff is ~10 times faster
+    #set the first value to the kinetic cycle time if known
+    deltat[0] = kct
+    
     return deltat
 
 #====================================================================================================
 def get_deltat_mode(t):
-    return sp.stats.mode( get_deltat(t) )[0][0]
+    '''Most commonly occuring time step'''
+    return sp.stats.mode(get_deltat(t))[0][0]
 
 #====================================================================================================
 def get_window(window, N=None):
+    '''
+    Return window values of window described by str `window' and length `N'
+    ...
+    '''
     if isinstance(window, str):
         if N is None:
             raise ValueError( 'Please specify window size N' )
         return sp.signal.get_window( window, N )
     
-    elif np.iterable(window):   #if window values are passed explicitly as a sequence of values
+    #if window values are passed explicitly as a sequence of values
+    elif np.iterable(window):
+        #if N given, assert that it matches the window length
         if not N is None:
-            assert len(window) == N, 'length {} of given window does not match array length {}'.format(len(window), N)
+            assert len(window) == N, ('length {} of given window does not match' 
+                                      'array length {}').format(len(window), N)
         return window
 
 #====================================================================================================
-def detect_gaps(t, kct=None, ltol=1.9, utol=np.inf):
+def detect_gaps(t, kct=None, ltol=1.9, utol=np.inf, tolerance='relative'):
     '''
     Data gap detection based on the most common (mode) time delta value.
     Parameters:
@@ -47,40 +57,45 @@ def detect_gaps(t, kct=None, ltol=1.9, utol=np.inf):
         lower detection tolerance - only flag gaps larger than ltol*kct
     utol : float
         upper detection tolerance - only flag gaps smaller than utol*kct
+    tolerance : str {'abs', 'rel'}
+        how the tolerance values are interpreted.
     '''
     
     if np.ndim(t) > 1:
         t = np.squeeze(t)
         assert np.ndim(t) == 1, 'Gap detection not supported for multidimentional arrays'
-
-    deltat = np.roll(t,-1) - t                     #time separation between successive values
-
-    if kct is None:
-        kct = sp.stats.mode(deltat)[0]                       #most frequently occuring time separation
-
-    #if utol is None:
-        #utol = np.inf
     
-    #embed()
+    if utol is None:
+        utol = np.inf
     
-    seq = np.abs( deltat / kct )
-    l = (seq > ltol) & (seq < utol)
-    gap_inds, = np.where( l )
-    return gap_inds[:-1]
+    deltat = np.abs(np.diff(t))      #absolute time separation between successive values
+    
+    if tolerance.lower().startswith('rel'):
+        if kct is None:
+            #use most frequently occuring time separation
+            kct = sp.stats.mode(deltat)[0]
+            
+        ltol *= kct
+        utol *= kct
+        
+    gap_inds, = np.where((deltat > ltol) & (deltat < utol))
+    return gap_inds
 
 #====================================================================================================
 #TODO: Investigate interpolate
+#WARNING: DON'T FILL GAPS --- RATHER USE METHODS THAT DO NOT REQUIRE THIS!
 def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True, ret_idx=False):     #ADD NOISE??
     ''' '''
     def make_filled_array(x, fillers):
         ''' intersperse the fillers and flatten to contiguous array. '''
         cont_secs = np.split(x, gap_inds+1)         #list with continuous sections of the original array
+        #TODO: speed checks
         return np.array( flatten(itt.zip_longest( cont_secs, fillers, fillvalue=[] )) ) 
     
     assert len(t)==len(y), 'Input arrays must have same length. len(t)={}; len(y)={}'.format( len(t), len(y) )
 
-    #if data is masked use unmasked values only
-    if np.ma.is_masked( y ):
+    #if data is masked: remove masked values (treat as gaps)
+    if np.ma.is_masked(y):
         t = t[~y.mask]
         y = y[~y.mask]
 
@@ -91,13 +106,10 @@ def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True, ret_idx=Fal
     Tfill, Yfill = [], []
     IDX = []
     
-    #from IPython import embed
-    #embed()
-    
     for i in gap_inds:
-        #print(i)
-        npoints = np.round((t[i+1]-t[i]) // kct)                            #number of points that will be inserted
-        t_fill = t[i] + np.arange(1, npoints)*kct                       #always fill time gaps with data at constant time step
+        #to handel missing data (single missing point
+        npoints = np.floor(round((t[i+1]-t[i]) / kct, 6))       #number of points that will be inserted
+        t_fill = t[i] + np.arange(1, npoints) * kct      #always fill time gaps with data at constant time step
         
         if mode == 'mean':
             mode = 'poly'
@@ -112,10 +124,8 @@ def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True, ret_idx=Fal
                 n, k = option, 20
             else:
                 n, k = option                                           #use k data values adjacent to gap to do the fit
-            #print( 'k', k )
-            #from misc import make_ipshell
-            #ipshell = make_ipshell()
-            #ipshell()
+                k = k   or 20           #if k is None
+
             i_l = max(0,i-k//2); i_u = min(i+k//2+1, len(t))
             coeff = np.polyfit(t[i_l:i_u], y[i_l:i_u], n)           #n gives degree of polinomial fit
             y_fill = np.polyval(coeff, t_fill)
@@ -145,7 +155,7 @@ def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True, ret_idx=Fal
         
         if ret_idx:
             IDX += list(range(i+1, i+1+len(t_fill)) )
-
+    
     if fill:
         Tfill = make_filled_array( t, Tfill )
         Yfill = make_filled_array( y, Yfill )
@@ -155,28 +165,7 @@ def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True, ret_idx=Fal
     else:
         return Tfill, Yfill
 
-        
-#====================================================================================================        
-def detrend(y, n=1, t=None, preserve_energy=True):
-    '''
-    Detrends the time series by fitting a polinomial of degree n and returning the fit residuals.
-    '''
-    if n is None:
-        return y
-    
-    if t is None:
-        t = np.arange(len(y))
-    coof = np.ma.polyfit(t, y, n)               #y may be masked!!      
-    
-    yd = y - np.polyval(coof, t)
-    
-    if preserve_energy and n>0:  #mean detrending inherently does not preserve energy
-        P = (y**2).sum()
-        Pd = (yd**2).sum()
-        offset = np.sqrt((P-Pd)/len(yd))
-        yd += offset
-    return yd
-    
+         
 #====================================================================================================        
 def rolling_var(data, wsize, overlap, min_points=2, center=False, samesize=False, ddof=0):
     #NOTE:  might be easier to just use pandas.rolling_var...
@@ -310,8 +299,9 @@ def rolling_var(data, wsize, overlap, min_points=2, center=False, samesize=False
     
     
 #==================================================================================================== 
-def smooth(x, wsize=11, window='hanning', fill=None, output_masked=None):
+def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
     #TODO:  Docstring
+    #TODO: smooth (filter) in timescale (use astropy.units?)
     ''' '''
     if x.ndim != 1:
         raise ValueError( "smooth only accepts 1 dimension arrays." )
@@ -319,88 +309,68 @@ def smooth(x, wsize=11, window='hanning', fill=None, output_masked=None):
     if x.size < wsize:
         raise ValueError( "Input vector needs to be bigger than window size." )
 
-    if wsize<3:
+    if wsize < 3:
         return x
 
     #get the window values
-    if not isinstance(window, str) and isinstance(window, Iterable):        #if window values are passed explicitly as a sequence of values
-        assert(len(window) == wsize)
-        windowVals = window
-    else:
-        windowVals = get_window( window, wsize )                     #window values
-
+    windowVals = get_window(window, wsize)      #window values
+    
+    #pad array symmetrically at both ends
     s = np.ma.concatenate([ x[wsize-1:0:-1], x, x[-1:-wsize:-1] ])
 
-    #compute lower and upper indices to use such that input array dimensions equal output array dimensions
-    div, mod = divmod( wsize, 2 )
+    #compute lower and upper indices to use such that input array dimensions 
+    #equal output array dimensions
+    div, mod = divmod(wsize, 2)
     if mod: #i.e. odd window length
-        pl, ph = div, div+mod
+        pl, ph = div, div + mod
     else:  #even window len
         pl = ph = div
 
-    #replace masked values with mean / median
-    if fill and np.ma.isMA( s ):
+    #replace masked values with mean / median.  They will be re-masked below
+    if fill and np.ma.isMA(s):
         #s.mask = np.r_[ x.mask[wsize-1:0:-1], x.mask, x.mask[-1:-wsize:-1] ]
-        wh = np.where( s.mask )[0]
+        wh = np.where(s.mask)[0]
 
-        idxs = itt.starmap( slice, zip(wh - pl, wh + ph) )
-        func = getattr( np.ma, fill )
-        fillmap = map( lambda idx: func(s[idx]), idxs )
-        fillvals = np.fromiter( fillmap, float )
+        idxs = itt.starmap(slice, zip(wh - pl, wh + ph))
+        func = getattr(np.ma, fill)     #TODO: error handeling
+        fillmap = map(lambda idx: func(s[idx]), idxs)
+        fillvals = np.fromiter(fillmap, float)
         s[s.mask] = fillvals
     
     #convolve the signal
-    w = windowVals/windowVals.sum()
+    w = windowVals / windowVals.sum()   #normalization
     y = np.convolve(w, s, mode='valid')
     
     #return
     output_masked = output_masked or np.ma.is_masked(x)
     if output_masked:
+        #re-mask values
         return np.ma.array( y[pl:-ph+1], mask=x.mask)
     
+    #return array that has same size as input array
     return y[pl:-ph+1]
         
         
 #====================================================================================================       
 
-
+from recipes.array import ArrayFolder
 ##############################################################################################################################################
-class Div(object):
-    
-    def __call__(self, a, wsize, overlap=0, axis=0, **kw):
-        return self.div( a, wsize, overlap=0, axis=0, **kw )
-    
+class WindowedArrayFolder(ArrayFolder):
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @staticmethod
-    def pad(a, wsize, overlap=0, axis=0, **kw):
-        ''' '''
-        assert wsize > 0, 'wsize > 0'
-        assert overlap >= 0, 'overlap >= 0'
-        assert overlap < wsize, 'overlap < wsize'
-        
-        mask = a.mask if np.ma.is_masked(a) else None
-        a = np.asarray(a)
-        N = a.shape[axis]
-        step = wsize - overlap
-        Nseg, leftover = divmod(N-overlap, step)
+    def fold(a, wsize, overlap=0, axis=0, **kw):
+        window = kw.pop('window', None)
+        sa = ArrayFolder.fold(a, wsize, overlap, axis, **kw)
+        return Div.windowed(sa, window)
 
-        if leftover:
-            
-            mode = kw.pop('pad', 'symmetric')       #default pad mode is symmetric
-            pad_end = step-leftover
-            pad_width = np.zeros((a.ndim, 2), int)       #initialise pad width indicator
-            pad_width[axis,-1] = pad_end            #pad the array at the end with 'pad_end' number of values
-            pad_width = lmap(tuple, pad_width)      #map to list of tuples
-            
-            #pad (apodise) the input signal
-            a = np.pad(a, pad_width, mode, **kw)
-            if not (mask is None or mask is False):
-                mask = np.pad(mask, pad_width, mode, **kw)
-        
-        if not mask is None:
-            a = np.ma.array( a, mask=mask )
-
-        return a, int(Nseg)
-
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    @staticmethod
+    def gen(a, wsize, overlap=0, axis=0, **kw):
+        window = kw.pop('window', None)
+        for sub in ArrayFolder.gen(a, wsize, overlap, axis, **kw):
+            yield  ArrayFolder.windowed(sub, window)
+    
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @staticmethod
     def windowed(a, window=None):
         '''get window values + apply'''
@@ -410,86 +380,9 @@ class Div(object):
         else:
             return a
 
-    @staticmethod
-    def get_strided_array(a, size, overlap, axis=0):
-        if axis<0:
-            axis += a.ndim
-        step = size - overlap
-        other_axes = np.setdiff1d(range(a.ndim), axis) #indeces of axes which aren't stepped along
-        
-        Nwindows = (a.shape[axis] - overlap) // step
-        new_shape = np.zeros(a.ndim)
-        new_shape[0] = Nwindows
-        new_shape[1:] = np.take(a.shape, other_axes)
-        new_shape = np.insert(new_shape, axis+1, size)
-        
-        new_strides = (step*a.strides[axis],) + a.strides
-
-        return as_strided( a, new_shape, new_strides )
-
-        
-    
-    @staticmethod
-    def div(a, wsize, overlap=0, axis=0, **kw):
-        '''
-        segment an array at given wsize, overlap, optionally applying a windowing function to each
-        segment.  
-        
-        keywords are passed to np.pad used to fill up the array to the required length.  This 
-        method works on multidimentional and masked array as well.
-        
-        keyword arguments are passed to np.pad to fill up the elements in the last window (default is 
-        symmetric padding).
-        
-        NOTE: When overlap is nonzero, the array returned by this function will have multiple entries
-        **with the same memory location**.  Beware of this when doing inplace arithmetic operations.
-        e.g. 
-        N, wsize, overlap = 100, 10, 5
-        q = Div.div(np.arange(N), wsize, overlap )
-        k = 0
-        q[0,overlap+k] *= 10
-        q[1,k] == q[0,overlap+k]  #is True
-        '''
-        window = kw.pop('window', None)
-        a, Nseg = Div.pad(a, wsize, overlap, **kw)
-        mask = a.mask if np.ma.is_masked(a) else None
-        
-        sa = Div.get_strided_array(a, wsize, overlap, axis)
-        
-        if not mask is None:
-            if not mask is False:
-                mask = Div.get_strided_array(mask, wsize, overlap)
-            sa = np.ma.array(sa, mask=mask)
-
-        return Div.windowed(sa, window)
-
-    @staticmethod
-    def gen(a, wsize, overlap=0, axis=0,**kw):
-        '''
-        Generator version of div.
-        '''
-        window = kw.pop('window', None)
-        a, Nseg = Div.pad(a, wsize, overlap, **kw)
-        
-        step = wsize - overlap
-
-        get_slice = lambda i: [slice(i*step, i*step+wsize) if j==axis 
-                                   else slice(None) for j in range(a.ndim)]
-        i = 0
-        while i<Nseg:
-            yield Div.windowed( a[get_slice(i)], window )
-            i += 1
-    
-    @staticmethod
-    def get_nocc(N, wsize, overlap):
-        '''
-        Return an array of length N, with elements representing the number of times that the index 
-        corresponding to that element would be repeated in the strided array.
-        '''
-        I = Div.div(range(N), wsize, overlap)
-        d = count_repeats( I.ravel() )
-        ix, noc = sortmore( *zip(*d.items()) )
-        return noc
+Div = WindowedArrayFolder
+#TODO: issue deprication warning?
+Div.div = Div.fold #depricated!
     
 ##############################################################################################################################################
     

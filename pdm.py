@@ -275,4 +275,16 @@ class PyPDM(object):
     
     
     
-    
+from scipy import stats
+def pdm(t, data, P):
+    return stats.binned_statistic((t/P)%1, data, 'std', 25, (0,1))[0].sum()
+
+def pdm2(t, data, func, P):
+    return stats.binned_statistic((t/P)%1, data, func, 25, (0,1))[0].sum()
+
+def pdm3(t, data, P, stat='std', bins=25, range=(0,1)):
+    s, b, h = stats.binned_statistic((t/P)%1, data, stat, bins, range)
+    return np.square(s).sum()
+
+def sarle_b(data):
+    return (stats.skew(data)**2 + 1) / stats.kurtosis(data)

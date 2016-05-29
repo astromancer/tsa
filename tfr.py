@@ -11,7 +11,7 @@ from matplotlib import ticker
 #from superplot.spectra import formatter_factory
 
 from .spectral import Spectral
-from .tsa import smooth
+from .tsa import smoother
 
 from grafico.lc import get_axlim
 from grafico.misc import ConnectionMixin, mpl_connect
@@ -70,7 +70,11 @@ class TimeFrequencyRepresentation(Spectral, ConnectionMixin):
                                 height_ratios=(30,100,1), 
                                 width_ratios=(4,1),
                                 hspace=0.02, 
-                                wspace=0.005)
+                                wspace=0.005,
+                                top=0.96,
+                                left=0.05,
+                                right=0.98,
+                                bottom=0.05 )
         self.ax_map     = ax_map        = fig.add_subplot( gs[1,0] )
         self.ax_lc      = ax_lc         = fig.add_subplot( gs[0], sharex=ax_map )
         self.ax_spec    = ax_spec       = fig.add_subplot( gs[1,1], sharey=ax_map )
@@ -149,7 +153,8 @@ class TimeFrequencyRepresentation(Spectral, ConnectionMixin):
         extent = (tms[0],tms[-1],frq[0],frq[-1])
         self.im  = im = mimage.NonUniformImage( self.ax_map, 
                                                 origin='lower',
-                                                extent=extent )
+                                                extent=extent,
+                                                cmap='viridis')
         #clim = np.percentile( P, (0, 100) )
         im.set_clim( Plim )
         data = im.cmap( P.T )
@@ -173,28 +178,30 @@ class TimeFrequencyRepresentation(Spectral, ConnectionMixin):
         #ax_map.set_ylim( frq[0],frq[-1] )
         
         self.colour_bar = self.figure.colorbar( im,
-                                                ticks=self.ax_spec.get_xticks(),
+                                                ticks=ax_spec.get_xticks(),
                                                 cax=ax_cb,
                                                 orientation='horizontal' )
 
-        plt.setp( self.ax_spec.get_xmajorticklabels(), visible=False )
+        #plt.setp(self.ax_spec.get_xmajorticklabels(), visible=False)
         
         self.canvas = self.figure.canvas
         self.canvas.draw()
         self.background = self.canvas.copy_from_bbox( self.figure.bbox )
         
-        def set_clim(axes):
-            xlim = axes.get_xlim()
+        def set_clim(ax):
+            xlim = ax.get_xlim()
             im.set_clim(xlim)
+            self.colour_bar.set_ticks(ax_spec.get_xticks())
+            
     
         ax_spec.callbacks.connect('xlim_changed', set_clim)
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def get_spectrum(self, ix, smoothing=0):
+    def get_spectrum(self, ix, smoothing=0): #misnomer?
         ''' '''
         data = self.power[ix]
         if smoothing:
-            data = smooth(data, smoothing)
+            data = smoother(data, smoothing)
         
         return np.array([data, self.frq])
     
@@ -224,6 +231,10 @@ class TimeFrequencyRepresentation(Spectral, ConnectionMixin):
     #def _on_draw(self, event):
         #print( 'drawing:', event )
     
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def ignore_hover(self, event):
+        return not (event.inaxes == self.ax_map and
+                    self.canvas.manager.toolbar._active is None)
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @mpl_connect( 'motion_notify_event' )
@@ -241,7 +252,7 @@ class TimeFrequencyRepresentation(Spectral, ConnectionMixin):
         #print('enter')
         #self.canvas.draw()
         
-        if event.inaxes == self.ax_map:
+        if not self.ignore_hover(event):
             #NOTE:  if the cursor "leaves" the axes directly onto another window, 
             #the axis leave event is not triggered!!
             if not self.hovering: #i.e legitimate axes enter
@@ -277,7 +288,7 @@ class TimeFrequencyRepresentation(Spectral, ConnectionMixin):
                 colour = next(self.icolour)
                 
                 spectrum = self.hover.get_xydata().T
-                line, = self.ax_spec.plot(*spectrum, color=colour, alpha=0.65)     #instantaneous spectum
+                line, = self.ax_spec.plot(*spectrum, color=colour, alpha=0.65, lw=1)     #instantaneous spectum
                 self.spectra.append(line)
                 
                 
@@ -315,7 +326,7 @@ class TimeFrequencyRepresentation(Spectral, ConnectionMixin):
         
         #reset colour cycle
         self.icolour = iter(self.color_cycle)
-        for span, spec in zip(self.spans, self.specrta):
+        for span, spec in zip(self.spans, self.spectra):
             span.remove()
             spec.remove()
             
