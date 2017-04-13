@@ -1,0 +1,18 @@
+*.idea
+#*.gitignore
+*.kate-swp
+*~
+/__pycache__
+*.bak
+*.pro
+
+# dev stuff
+spectral.[0-9]*.py
+spectral_comp*
+tfr.[0-9].py
+cl_alpha.py
+cl_bean.py
+cl_subcmp.py
+clean.py
+lc.py
+

@@ -1,491 +1,498 @@
-#
+'''
+Tools for spectral estimation
+'''
+
+# TODO: unit tests!!!
+
+import functools
 import warnings
-from copy import copy
-import itertools as itt
 
 import numpy as np
+import scipy
 
-#import scipy as sp
-from scipy.fftpack import rfftfreq, fft
-#from lombscargle import fasper, getSignificance
-from scipy.signal import lombscargle
-
-#from pynfft import NFFT, Solver
-
-
-#from myio import warn
-#from magic.dict import TransDict
-
-from .tsa import WindowedArrayFolder as af
-from .tsa import fill_gaps, get_deltat, get_deltat_mode
-from .    import detrending
+from recipes.dict import AttrDict
+from .gaps import fill_gaps, get_deltat_mode  # , windowed
+from . import windowing, fold, detrending
 
 from IPython import embed
 
-#====================================================================================================
+
+# ====================================================================================================
 def FFTpower(y, norm=0, detrend=()):
-    '''Compute FFT power. optionally normalize and or detrend'''
-    
+    '''Compute FFT power (aka periodogram). optionally normalize and or detrend'''
+
     y = detrending.detrend(y, *detrend)
-    
-    sp = abs(np.fft.rfft(y)) ** 2     #Power
-    
+    sp = abs(np.fft.rfft(y)) ** 2  # Power
+
     if norm:
         sp /= sp.sum()
-    
+
     return sp
-    
+
+
 periodogram = FFTpower
 
 
-#====================================================================================================
-def FTspectra(data, detrend=None):
+# ====================================================================================================
+def FFTpowers(data, detrend=None):
     '''
-    Single-Sided Amplitude Spectrum of y(t). Multiprocessing implimentation 
+    Single-Sided Amplitude Spectrum of y(t). Multiprocessing implimentation
     NOTE: This assumes evenly sampled data!
     '''
     import multiprocessing as mp
     func = functools.partial(FFTpower, detrend=detrend)
-    
+
     pool = mp.Pool()
     specs = pool.map(func, data)
     pool.close()
     pool.join()
-    
+
     return np.array(specs)
 
-#====================================================================================================
-def NFFTspect(nodes, values, N, M):
-    nfft = NFFT( N=[N, N], M=M )
-    nfft.x = np.c_[ nodes, np.zeros_like(nodes) ]
-    nfft.precompute()
 
-    #f     = np.empty( M,       dtype=np.complex128)
-    #f_hat = np.empty( (N, N), dtype=np.complex128)
-
-    infft = Solver(nfft)
-    infft.y = values         # '''right hand side, samples.'''
-
-    #infft.f_hat_iter = initial_f_hat # assign arbitrary initial solution guess, default is 0
-    #print( infft.r_iter )# etc...all internals should still be uninitialized
-
-    infft.before_loop()       # initialize solver internals
-    #print( 'infft.r_iter', infft.r_iter ) # etc...all internals should be initialized
-
-    nIter = 0
-    maxIter = 50                    # completely arbitrary
-    threshold = 1e-6
-    while (infft.r_iter.sum() > threshold):
-        if nIter > maxIter:
-            raise RuntimeError( 'Solver did not converge, aborting' )
-        infft.loop_one_step()
-        nIter += 1
-    
-    return infft.f_hat_iter[:,0]
+# ====================================================================================================
+# def cross_spectrum(signalA, signalB):
 
 
-##############################################################################################################################################
-#class SpectralDataWrapper(object):
-    ##====================================================================================================
-    #def __init__(self):
-         #self.f = []
-         #self.A = []
-         #self.signif = []
-    
-    ##====================================================================================================
-    #def __getitem__(self, key):
-        #return self.f[key], self.A[key], self.signif[key]
-            
-    ##====================================================================================================
-    #def __setitem__(self, key, vals):   
-        #self.f[key], self.A[key], self.signif[key] = vals
-
-##############################################################################################################################################
+########################################################################################################################
 class Spectral(object):
-    '''...'''
-    #CompKW = ['split', 'detrend', 'pad', 'gaps', 'window', 'nwindow', 'noverlap']
-    #WINDOWS = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
-    #====================================================================================================
-    @staticmethod
-    def show_all_windows(cmap='gist_rainbow'):
-        '''plot all the spectral windows defined in scipy.signal (at least those that don't want a 
-        parameter argument.)'''
-        fig, ax = plt.subplots()
-        cm = plt.get_cmap(cmap)
-        allwin = sp.signal.windows.__all__
-        ax.set_color_cycle( cm(np.linspace(0,1,len(allwin))) )
-        
-        winge = fct.partial(sp.signal.get_window, Nx=1024)
-        for w in allwin:
-            try:
-                plt.plot(winge(w), label=w)
-            except:
-                pass
-        plt.legend()
-        plt.show()
-        
-    #====================================================================================================
-    def __init__(self, t, signal, **kw):
-        #TODO: update docstring
+    '''Spectral estimation routines'''
+
+    allowed_vals = dict(  # use=('ls', 'fft'),
+        timescale=('h', 's'),
+        # pad=('constant', 'mean', 'median', 'minimum',
+        #      'maximum', 'reflect', 'symmetric', 'wrap',
+        #      'linear_ramp', 'edge'),
+        normalise=(True, False, 'rms', 'leahy', 'leahy density'), )
+
+    defaults = AttrDict(use='fft',
+                        timescale='s',
+                        split=None,
+                        detrend=None,
+                        pad=None,  # 'mean',     #effectively a 0 pad after mean de-trend...
+                        gaps=None,
+                        window='boxcar',
+                        nwindow=None,
+                        noverlap=0,
+                        dt=None,
+                        fs=None,
+                        normalise='rms', )
+    # translation
+    dictionary = dict(apodize='window',
+                      apodise='window',
+                      taper='window',
+                      # nfft='nwindow',
+                      normalize='normalise',
+                      norm='normalise',
+                      overlap='noverlap',
+                      nperseg='nwindow',
+                      kct='dt',
+                      sampling_frequency='fs')
+
+    valdict = dict(hours='h', hour='h',
+                   seconds='s', sec='s')
+
+    # ====================================================================================================
+    # def use_ls(self, opt):
+    #     return opt.lower() in ('lomb-scargle', 'lombscargle', 'ls')
+    #
+    # def use_fft(self, opt):
+    #     return opt.lower() in ('ft', 'fourier', 'fft')
+
+    # ====================================================================================================
+    def __init__(self, *args, **kws):  # TODO: this should be a call method
+        # TODO: update docstring
+        # otherwise sample spacing / frequency will suffice
         '''
         Compute frequency power spectrum or Time Frequency representation (TFR).
+
         Parameters
         ----------
-        t       :       array-like
-            time
+        args    :
+            (signal,)      - in which case t will be extrapolated (from dt if given)
+            (t, signal)    - in which case
         signal  :       array-like
             values for which to compute power spectrum / TFR
-            
-        If 'split' is a number, split the sequence into that number of roughly
-        equal portions. If split is a list, split the array according to the
-        indeces in that list.
         '''
-        #print( 'Spectral.compute' )
-        #print( kw )
-        
-        assert len(t) == len(signal)
-        #print(len(signal))
-        
-        #Check acceptable keyword combinations
-        #allkeys = kw.keys()
-        #disallowedkwargs = {
-            #'split': ['nwindow', 'noverlap'],
-            #'nwindow': ['split'],
-            #'noverlap': ['split']       }
-        
-        #kwneeded = {'noverlap': 'nwindow'}
-        #kwdefaults = {
-            #'which': 'raw',
-            #'split': 1,
-            #'detrend': 0 ,
-            #'pad': None,
-            #'gaps': None,
-            #'window': lambda x: 1.,
-            #'nwindow': 2**8,
-            #'noverlap': 2**7,
-            #}
-        
-        #kwoptions = {}
-        #else: raise KeyError('Invalid option %s for keyword %s') 
-        
-        # Make sure have allowed kw combinations
-        #for key in kw:
-            #if key in disallowedkwargs:
-                #if [k in disallowedkwargs[key]
-                #raise ValueError('{} keyword not in allowed keywords {}'.format( key, np.setdiff1d(allkeys, disallowedkwargs[key]) ) )
-        
-        # Set kw defaults
-        #for key in np.setdiff1d(allkeys, disallowedkwargs[key]):
-            #kw.setdefault(key, kwdefaults[key])
-        
-        #kw = TransDict(**kw)
-        #translations = ((('frequency', 'freq', 'frq'),                  'f'),
-                        #(('lomb-scargle', 'lombscargle'),               'ls'),
-                        #(('noverlap',),                                 'overlap'))
-                        ##(('noverlap',),                                 'overlap'))
-        #transmap = dict(itt.chain(*( itt.zip_longest( k, (v,), fillvalue=v ) for k,v in m )))
-        #kw.translate( transmap )
-        #====================================================================================================
-        use =           kw.setdefault( 'use',           'fft'           )
-        timescale =     kw.setdefault( 'timescale',     's'             )          #the timescale of the passed time variable.  Will be used to convert to s timescale.
-        split =         kw.setdefault( 'split',         None            )
-        detrend =       kw.setdefault( 'detrend',       ()              )
-        pad =           kw.setdefault( 'pad',           'symmetric'     )        #'constant', 'mean', ,'median', 'minimum', 'maximum', 'reflect', 'symmetric', 'wrap', 'linear_ramp', 'edge' 
-        gaps =          kw.setdefault( 'gaps',          None            )        #tuple with fill method and option
-        window =        kw.setdefault( 'window',        'boxcar'        )
-        nwindow =       kw.setdefault( 'nwindow',       None            )
-        noverlap =      kw.setdefault( 'overlap',       0               )
-        kct =           kw.setdefault( 'kct',           None            )
-        apodise =       kw.setdefault( 'apodise',       None            )
-        normalise =     kw.setdefault( 'normalise',     None            )
-        f =             kw.setdefault( 'f',             None            )
-        #====================================================================================================
-        
-        #print( kw )
-        
-        if kct is None:
-            #warn( 'Determining KCT from time-step mode stat.' )
-            #try:
-                #dt = get_deltat(t)[1:]
-            #except IndexError:
-                #embed()
-            dt = get_deltat(t)[1:]
-            if np.allclose(dt, dt[0]):          #constant time steps
-                kct = dt[0]
-            else:                               #non-constant time steps!
-                unqdt = np.unique(dt)
-                kct = get_deltat_mode(t)
-                warnings.warn(('Non-constant time steps \n{}\n '
-                               'Assuming KCT is time-step mode: {}.'
-                               ''.format(unqdt, kct)))
-                
-        
-        #if (use.lower() in ('fft', 'fourier') or not gaps is None) and kct is None:
-            #kct = Spectral.get_delta( t )
-            #desc = 'FFT analysis' if use.lower in ('fft', 'fourier') else 'Gap detection'
-            #warn('{} analysis requested, no KCT supplied.  KCT={} assumed from the most frequently occuring time delta (mode)...'.format(desc, kct))
-        
-        #Fill data gaps 
-        #NOTE: we have to do this before allocating nwindow since len(t) changes
-        if gaps:
-            fillmethod, option = gaps
-            #print( fillmethod, option )
-            t, signal = fill_gaps(t, signal, kct, fillmethod, option)
 
-        elif np.ma.is_masked(signal):
-            warnings.warn( 'Removing masked values from signal!  This may not be a good idea...' )
-            t = t[~signal.mask]
-            signal = signal[~signal.mask]
-        
-        assert len(t) == len(signal)
-        #print(len(signal))
-        
-        if nwindow is None:
-            if split is None:
-                nwindow = len(t)                #No segmentation
-            elif isinstance(split, int):
-                nwindow = len(t) // split       #*split* number of segments
-            else:
-                #split at specific indeces
-                'check that split is the correct format'                                    #if split values are passed explicitly as an integer or iterable
+        # If 'split' is a number, split the sequence into that number of roughly
+        # equal portions. If split is a list, split the array according to the
+        # indices in that list.
+
+        *t, signal = args
+        t = np.squeeze(t)
+        # self.has_t = ~bool(len(t))
+        # embed()
+
+        # translate keywords & check
+        opts = self.opts = self.defaults.copy()
+        kws = self.translate(kws)
+        self.check(t, signal, **kws)
+        opts.update(kws)
+        # self.opts = AttrDict(opts)
+
+        # timing stats
+        self.dt, self.fs = self.check_timing(t, self.opts)
+
+        # clean masked, fill gaps etc
+
+        # embed()
+        # try:
+        t, signal = self.prepare_signal(signal, t, self.dt)
+        # except Exception as err:
+            # embed()
+            #raise err
+        self.nwindow = resolve_nwindow(self.opts.nwindow, self.opts.split, t, self.dt)
+        self.noverlap = resolve_overlap(self.nwindow, self.opts.noverlap)
+        self.fRayleigh = 1. / (self.nwindow * self.dt)
+
+        # fold
+        self.t_seg, signal_seg = self.get_segments(signal, t, self.dt,
+                                                   self.nwindow, self.noverlap)
+
+        self.raw_seg = signal_seg
+        # median time for each section
+        self.tms = np.median(self.t_seg, 1)
+
+        # pad, detrend, window
+        self.segments = self.prepare_segments(signal_seg)
+
+        # FFT frequencies
+        nw = self.npadded or self.nwindow
+        self.frq = np.fft.rfftfreq(nw, self.dt)
+        self.ohm = 2. * np.pi * self.frq  # angular frequencies
+
+        # calculate spectra
+        self.power = self.main(self.segments)
+        self.normed = self.opts.normalise
+
+    # ====================================================================================================
+    def translate(self, kws):
+        nkws = {}
+        for key, val in kws.items():
+            if key in self.dictionary:
+                key = self.dictionary[key]
+            nkws[key.lower()] = val
+        return nkws
+
+    # ====================================================================================================
+    def check(self, t, signal, **kws):
+        '''Checks'''
+        if len(t) == 0:
+            assert len(t) == len(signal)
+
+        allowed_kws = self.defaults.keys()
+        for key, val in kws.items():
+            assert key in allowed_kws, 'Keyword %r not recognised' % key
+            # Check acceptable keyword values
+            val = self.valdict.get(val, val)
+            if key in self.allowed_vals:
+                allowed_vals = self.allowed_vals[key]
+                if val not in allowed_vals:  # + (None, False)
+                    borkmsg = ('Option %r not recognised for keyword %r. The following values '
+                               'are allowed: %s')
+                    raise ValueError(borkmsg % (kws[key], key, allowed_vals))
+
+    # ====================================================================================================
+    def check_timing(self, t, opts):
+
+        dt = opts.dt
+        fs = opts.get('fs')
+
+        if (dt is None) and (fs is None) and (len(t) == 0):
+            raise ValueError('Please provide one of the following: dt - sample time spacing,'
+                             'fs - sampling frequency, t - time sequence')
+
+        if fs and not dt:
+            dt = 1. / fs
+
+        if len(t) and (dt is None):  # sample spacing in time units
+            Dt = np.diff(t)
+            if np.allclose(Dt, Dt[0]):  # TODO: include tolerance value         # constant time steps
+                dt = Dt[0]
+            else:  # non-constant time steps!
+                unqdt = np.unique(Dt)
+                dt = get_deltat_mode(t)
+                if len(unqdt) > 10:
+                    info = '%i unique values between (%f, %f). ' % (len(unqdt), Dt.min(), Dt.max())
+                else:
+                    info = str(unqdt)
+                msg = ('Non-constant time steps: %s. '
+                       'Using time-step mode: %f for all further calculations.'
+                       '' % (info, dt))
+                warnings.warn(msg)
         else:
-            if isinstance(nwindow, str):
-                #if nwindow.endswith('s'):
-                print( 'nwindow', nwindow )
-                nwindow = round( float(nwindow.strip('s')) / kct )
-                print( 'nwindow', nwindow )
-            else:
-                'check that nwindow is integer'                                 #CAN BE HANDELED BY KW OPTIONS
-        
-        noverlap = self.get_overlap(nwindow, noverlap)
-        
-        if timescale=='h':
-            conv_fact = 3600.                                                       #conversion factor for kct to timing array passed to this function
-        elif timescale=='s':
-            conv_fact = 1
-        
+            ''  # TODO: check if dt same as implied by t??
+        fs = 1. / dt
+        return dt, fs
 
-            
-        #====================================================================================================
-        #print( nwindow, noverlap )
-        
-        segments, Power = [], []
-        
+    # ====================================================================================================
+    def prepare_signal(self, signal, t, dt):
+
+        is_masked = np.ma.is_masked(signal)
+        # if is_masked:
+        #     signal = signal[~signal.mask]
+
+        # Fill data gaps
+        # NOTE: we have to do this before allocating nwindow since len(t) might change.
+        if len(t):
+            if self.opts.gaps:
+                fillmethod, option = self.opts.gaps
+                t, signal = fill_gaps(t, signal, dt, fillmethod, option)
+
+            elif is_masked:
+                warnings.warn('Removing masked values from signal! This may not be a good idea...')
+                t = t[~signal.mask]
+        else:
+            ''
+
+        return t, signal
+
+    # ====================================================================================================
+    def get_segments(self, signal, t, dt, nwindow, noverlap):
+        # fold
+
         if nwindow:
             step = nwindow - noverlap
-            leftover = (len(t)-noverlap) % step
-            end_time = t[-1] + kct * (step-leftover) ,
-            self.t_seg = af.fold(t, nwindow, noverlap, 
-                                  pad='linear_ramp', 
-                                  end_values=end_time )
-            self.raw_seg = af.fold(signal,  nwindow, noverlap, window=window) #padding will happen below
+            signal_seg = fold.fold(signal, nwindow, noverlap)
+            # padding will happen below for each section
+            if not len(t):
+                t_ = np.arange(nwindow) * dt
+                tstep = np.arange(1, len(signal_seg) + 1) * step * dt
+                t_seg = t_ + tstep[None].T
+            else:
+                # NOTE: unnecessary for uniform sample spacing
+                leftover = (len(t) - noverlap) % step
+                end_time = t[-1] + dt * (step - leftover)
+                t_seg = fold.fold(t, nwindow, noverlap,
+                                  pad='linear_ramp',
+                                  end_values=(end_time,))
         else:
-            self.t_seg          = np.split(t, split)
-            self.raw_seg        = np.split(signal, split)
-        
-        #print(self.t_seg.shape[1], len(t), nwindow        )
-        
-        self.tms = np.median( self.t_seg, 1 )                #mid time for each section
-        
-        #FFT frequencies
-        #embed()
-        if f is None:
-            f = np.fft.rfftfreq(apodise or nwindow, kct)
-        self.frq = f
-        
-        if use.lower() in ('ls', 'lomb-scargle', 'lombscargle'):
-            if 0 in f:
-                self.frq = f = f[1:]
-        self.ohm = 2*np.pi*f         #angular frequencies
-        
-        
-        
-        #TODO: MULIPROCESS!
-        for i, (t_s, seg) in enumerate(zip(self.t_seg, self.raw_seg)):
-            
-            t = (t_s - t_s[0]) * conv_fact                                                 #time in seconds          #NOTE:  THESE CONVERSION VALUES WILL CHANGE DEPENDING ON THE TIME VARIABLE PASSED TO  ls()
-            #T = t[-1]  #length of this segment in sec
-            if 'poly' in detrend:
-                dtrend = detrend + (t,)
-            
-            seg = detrending.detrend(seg, *detrend, preserve_energy=False)
-            #NOTE THAT OUTLIERS WILL ADVERSELY INFLUENCE POLINOMIAL DETRENDING!!!!
-            #print( seg )
-            
-            if apodise:                 #pad each segment so that it ends up being this size
-                #TODO: MOVE OUT OF LOOP
-                div, mod = divmod(apodise - len(t), 2)
-                padwidth = (div, div + mod)
-                
-                #embed()
-                
-                seg = np.pad(seg, (div, div+mod), 
-                             mode='constant', constant_values=0 )
-            
-            #print( 'Calculating ls for section {}: t in [{},{}]'.format(i, t_s[0], t_s[-1])  )
-            
-            if use.lower() in ('ls', 'lomb-scargle', 'lombscargle'):
-                #embed()
-                P = lombscargle(t, seg, self.ohm)  #LS periodogram
-                #P = np.r_[np.nan, P]    #DC signal cannot be measure by LS
-                
-            if use.lower() in ('fft', 'fourier'):
-                P = FFTpower(seg, norm=False)
-            
-            #FIXME: appending is SLOWWWWWWWWW
-            segments.append( seg )
-            Power.append( P )
-        
-        self.power = np.array(Power)
-        self.segments = np.array(segments)
-        
-        if normalise is True:
-            normalise = 'rms'
-    
-        if isinstance(normalise, str):
-            self.normed = normalise = normalise.lower()
-            Nph = np.c_[ self.raw_seg.sum(1) ]
-            #Nph = signal.sum()                 #N_{\gamma} in Leahy 83 = DC component of FFT
-            #N = len(signal)
-            T = nwindow * kct
-            if normalise=='leahy':
-                self.power = 2 * self.power / Nph
-            elif normalise=='leahy density':
-                self.power = 2 * T * self.power / Nph
-            elif normalise=='rms':
-                self.power = 2 * T * self.power / Nph**2
-    
-    
-    #====================================================================================================
-    @staticmethod
-    def get_overlap(nwindow, noverlap):
-        '''convert overlap to integer value'''
-        if not bool(noverlap):
-            return 0
-        
-        if isinstance(noverlap, str):       #overlap specified by percentage string eg: 99% or timescale eg: 60s
-            if noverlap.endswith('%'):
-                frac = float(noverlap.strip('%')) / 100
-            noverlap = frac * nwindow
-            
-        if isinstance(noverlap, float):
-            noverlap = round(noverlap)
-            
-        if noverlap<0:                      #negative overlap works like negative indexing! :)
-            noverlap += nwindow
-            
-        if noverlap==nwindow:
-            noverlap -= 1                   #Maximal overlap!
-        
-        return noverlap
+            raise NotImplementedError
+            # self.t_seg          = np.split(t, self.opts.split)
+            # self.raw_seg        = np.split(signal, self.opts.split)
 
-    #====================================================================================================
+        return t_seg, signal_seg
+
+    # ====================================================================================================
+    def prepare_segments(self, segments):
+
+        detrend_method, detrend_order, detrend_opt = resolve_detrend(self.opts.detrend)
+
+        # conversion factor for dt to timing array passed to this function
+        # conv_fact = {'s' : 1,
+        # 'h' : 3600}[self.opts.timescale]
+
+        # detrend
+        segments = detrending.detrend(segments, detrend_order, **detrend_opt)
+
+        # padding
+        if self.opts.pad:
+            npad, pad_method, pad_kws = resolve_padding(self.opts.pad, self.nwindow, self.dt)
+            self.npadded = npad
+            extra = npad - self.nwindow
+
+            # this does pre- AND post padding # WARNING: does this mess with the phase??
+            div, mod = divmod(extra, 2)
+            pad_width = ((0, 0), (div, div + mod))
+            # pad_width = ((0, 0),(0, apodise - self.nwindow)
+            segments = np.pad(segments, pad_width, mode=pad_method, **pad_kws)
+        else:
+            self.npadded = self.nwindow
+
+        # apply windowing
+        segments = windowing.windowed(segments, self.opts.window)
+        # Nsegs = len(segments)
+
+        return segments
+
+    # ====================================================================================================
+    def main(self, segments):  # calculate_spectra
+        # calculate spectra
+        spec = scipy.fftpack.fft(segments)
+        spec = spec[..., :len(self.frq)]  # since we are dealing with real signals
+        power = np.square(np.abs(spec))
+        power = normaliser(power, self.segments, self.opts.normalise,
+                           self.npadded, self.dt)
+        return power
+
+    # ====================================================================================================
+    # def get_nfft(self, ):
+
+    # ====================================================================================================
     def __iter__(self):
         '''enable use case: f, P = Spectral(t, s)'''
         return iter((self.frq, self.power))
 
-        
 
-def normalizer(power, how, kct=None):
-    #TODO:
+# TODO: subclass for LS TFR
+# TODO methods for non-uniform window length??
+# TODO: functions for plotting segments etc...
+
+# ====================================================================================================
+def normaliser(power, segments, how, nwindow, dt):
+    ''' '''
+    if how is False:
+        return power
+
+    if how is True:
+        how = 'rms'
+
     if not isinstance(how, str):
         raise ValueError
-        
+
     how = how.lower()
-    Nph = np.c_[ self.raw_seg.sum(1) ]
-    #Nph = signal.sum()                 #N_{\gamma} in Leahy 83 = DC component of FFT
-    #N = len(signal)
-    T = nwindow * kct
-    if how=='leahy':
-        return 2 * power / Nph
-    
-    elif how=='leahy density':
-        return 2 * T * power / Nph
-    
-    elif how=='rms':
-       return 2 * T * power / Nph**2
+    # NOTE: each segment will be normalized individually
+    Nph = np.c_[segments.sum(1)]
+    # Nph = signal.sum()                 #N_{\gamma} in Leahy 83 = DC component of FFT
+    # N = len(signal)
 
-        
-        
-        
-        
-#Orphans        
-#def running_sigma_clip(x, sig=3., nwindow=100, noverlap=0, iters=None, cenfunc=np.ma.median, varfunc=np.ma.var):
+    # NOTE: factor 2 below comes from the fact that the signal is real (one-sided)
+    # However, we do not need to double the DC component, and in the case of even
+    # number of frequencies, the last point (which is unpaired Nyquist freq)
+    end = None if (nwindow % 2) else -1
+    power[1:end] *= 2
 
-    ##SLOWWWWWWWWW...................
-    
-    #step = nwindow - noverlap
-    #o = (nwindow // step) + int(bool(nwindow % step))
+    # FIXME: are you including the power of the window function?????
+    scale = 1
+    if how == 'leahy':
+        scale = 1 / Nph
 
-    #if not np.ma.is_masked(x):
-        #x = np.ma.array(x, mask=np.isnan(x))
-        
-    #sections = af.fold( x, nwindow, noverlap )
-    #filtered_data = []
-    #for i, sec in enumerate(sections):
-        
-        #filtered_sec = sec.copy()
-        
-        #if iters is None:
-            #lastrej = filtered_sec.count() + 1
-            #while (filtered_sec.count() != lastrej):
-                
-                #lastrej = filtered_sec.count()
-                #secdiv = filtered_sec - cenfunc(filtered_sec)
-                
-                #flagged = np.ma.greater( secdiv*secdiv, varfunc(secdiv)*sig**2 )
-                #w, = np.where(flagged)
-                #wmin, wmax = w.min(), w.max()
-                #flagger = sections[i-o+wmin+1:i+1].mask
-                #for j in range(wmax-wmin):
-                    #flagger[j, nwindow-j-1:] |= flag[wmin:wmin+j+1]
-                
+    T = nwindow * dt  # total time per segment #TODO: what if this changes per segment??
+    if how == 'leahy density':
+        scale = T / Nph
 
-                #filtered_sec.mask |= False
-                ##print( filtered_sec.mask )
-            ##iters = i + 1
-        #else:
-            #for k in range(iters):
-                #secdiv = filtered_sec - cenfunc(filtered_sec)
-                #filtered_sec.mask |= np.ma.greater( secdiv*secdiv, varfunc(secdiv)*sig**2 )
+    if how == 'rms':
+        scale = T / Nph ** 2
 
-        #filtered_data.append( filtered_sec )
-
-    #return np.ma.concatenate(filtered_data)[:len(x)]
-
-    
-#def rejection(i):
-    #global sections
-    #sec = sections[i]
-    #last_rej_count = sec.mask.sum()  #non masked items
-    #print( 'section ', i, sec )
-    #for j in range(1):
-        #print( '\tj =', j )
-        #secdev = sec - cenfunc(sec)
-        #secstd = np.sqrt( varfunc(secdev) )
-        #flagged = (-sig*secstd > secdev) & (secdev > sig*secstd)
-        ##flagged = np.ma.greater( secdev*secdev, varfunc(secdev)*sig**2 )  #This produces a masked array if data in sec has masked values, hence
-        #flagged = flagged.data & flagged.mask                                               #Produces a numpy array (not masked) 
-        #print( 'flagged', flagged )
-        #print( 'last_rej_count, flagged.sum()',  last_rej_count, flagged.sum() )
-        #if last_rej_count == flagged.sum():            #No new rejections on this pass
-            #print( 'returning\n' )
-            #return
-        
-        ##because of the overlap we have to modify all the preceding sections that contain the
-        ##now-rejected data points, also masking them in these segments and recomputing the variance
-        ##for those segments, and checking if any new points need to be rejected in those segments 
-        ##based on the new variance
-        #w, = np.where(flagged)                          #indeces of rejected points based on criterion above
-        #print( 'flagged @', w )
-        #wmin, wmax = w.min(), w.max()                   
-        #flagger = sections[i-o+wmin+1:i+1].mask         #a slice of the lagged array containing new-rejected points
-        #for k in range(wmax-wmin):
-            #print( '\t\tk =', k )
-            #flagger[k, nwindow-k-1:] |= flagged[wmin:wmin+k+1]    #mask all the new-rejected points in the preceding segments of the lagged array
-            ##recompute variance
-            #print( 'recurring' )
-            #print( )
-            #rejection( i-o+wmin+k+1 )
+    return scale * power
 
 
+normalizer = normaliser
+
+
+# ====================================================================================================
+def resolve_nwindow(nwindow, split, t, dt):
+    if nwindow is None:
+        if split is None:
+            nwindow = len(t)  # No segmentation
+        elif isinstance(split, int):
+            nwindow = len(t) // split  # *split* number of segments
+        else:  # if split values are passed explicitly as a sequence
+            # split at specific indeces
+            'check that split is the correct format'
+            # NOTE: handeling this case complicates things because segments
+            # no longer be uniform length. Better to delegate this to case
+            # separate mainloop
+            raise NotImplementedError
+    else:
+        if isinstance(nwindow, str):
+            if nwindow.endswith('s'):
+                nwindow = round(float(nwindow.strip('s')) / dt)
+            else:
+                raise NotImplementedError
+        else:
+            'check that nwindow is integer'  # CAN BE HANDELED BY KW OPTIONS
+    return nwindow
+
+
+# ====================================================================================================
+def resolve_overlap(nwindow, noverlap):
+    '''convert overlap to integer value'''
+    if not bool(noverlap):
+        return 0
+
+    # overlap specified by percentage string eg: 99% or timescale eg: 60s
+    if isinstance(noverlap, str):
+        if noverlap.endswith('%'):
+            frac = float(noverlap.strip('%')) / 100
+            noverlap = frac * nwindow
+
+    if isinstance(noverlap, float):
+        # ISSUE WARNING??
+        noverlap = round(noverlap)
+
+    # negative overlap works like negative indexing! :)
+    if noverlap < 0:
+        noverlap += nwindow
+
+    if noverlap == nwindow:
+        noverlap -= 1  # Maximal overlap!
+        warnings.warn('Specified overlap equals window size. Adjusting to '
+                      'maximal overlap = %i' % noverlap)
+    return noverlap
+
+
+# ====================================================================================================
+def resolve_padding(args, nwindow, dt):
+    known_methods = ('constant', 'mean', 'median', 'minimum', 'maximum', 'reflect', 'symmetric',
+                     'wrap', 'linear_ramp', 'edge')
+    if isinstance(args, tuple):
+        size, method, *kws = args
+        assert method in known_methods
+        if isinstance(size, str):
+            if size.endswith('s'):
+                size = round(float(size.strip('s')) / dt)
+            elif size.endswith('%'):
+                frac = float(size.strip('%')) / 100
+                size = frac * nwindow
+        size = round(size)
+        if size < nwindow:
+            raise ValueError('Total padded segment length %i cannot be smaller than nwindow %i'
+                             '' % (size, nwindow))
+
+        if not len(kws):
+            kws = {}
+
+        return size, method, kws
+    else:
+        raise ValueError('Padding needs to be a tuple containing 1) desired signal size (int)'
+                         '2) padding method (str), 3) optional arguments for method (dict)')
+
+
+# ====================================================================================================
+def resolve_detrend(detrend):
+    # TODO: unify detrend & smoothing into filtering interface
+    if detrend is None:
+        detrend_method, detrend_order, detrend_opt = None, None, {}
+
+    elif isinstance(detrend, str):
+        detrend_method, detrend_order, detrend_opt = detrend, None, {}
+
+    elif isinstance(detrend, tuple):
+        detrend_method, detrend_order = detrend
+        detrend_opt = {}
+
+    elif isinstance(detrend, dict):
+        detrend_method = detrend.pop('method', None)
+        detrend_order = None
+        detrend_opt = detrend
+
+    else:
+        raise ValueError('Detrend kw not understood')
+
+    return detrend_method, detrend_order, detrend_opt
+
+
+# ====================================================================================================
+def show_all_windows(cmap='gist_rainbow'):
+    '''
+    plot all the spectral windows defined in scipy.signal (at least those that
+    don't want a parameter argument.)
+    '''
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    cm = plt.get_cmap(cmap)
+    allwin = scipy.signal.windows.__all__
+    colours = cm(np.linspace(0, 1, len(allwin)))
+    ax.set_color_cycle(colours)
+
+    winge = functools.partial(scipy.signal.get_window, Nx=1024)
+    for w in allwin:
+        try:
+            plt.plot(winge(w), label=w)
+        except:
+            pass
+    plt.legend()
+    plt.show()
