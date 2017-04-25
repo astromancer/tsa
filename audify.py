@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def rescale(data, interval=(-1, 1)):
     '''Linearly rescale data to fall within given interval'''
     data = np.asarray(data)
@@ -28,3 +29,5 @@ def FrequencyModulator(data, duration, fs=44.1e3, phase=0, fcarrier=None, fdev=N
 
     # generate FM signal:
     return np.cos(2 * np.pi * (fcarrier * t + fdev * np.cumsum(rescaled)) + phase)
+
+
