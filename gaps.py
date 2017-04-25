@@ -5,20 +5,23 @@ from scipy import stats
 
 from recipes.list import flatten
 
-#====================================================================================================
+
+# ====================================================================================================
 def get_deltat(t, kct=None):
     '''compute 1st order discrete difference (time steps). set value of the
     first time step if known.'''
-    deltat = t - np.roll(t,1)           #FIXME: np.diff is ~10 times faster
-    #set the first value to the kinetic cycle time if known
+    deltat = t - np.roll(t, 1)  # FIXME: np.diff is ~10 times faster
+    # set the first value to the kinetic cycle time if known
     deltat[0] = kct
 
     return deltat
 
-#====================================================================================================
+
+# ====================================================================================================
 def get_deltat_mode(t):
     '''Most commonly occuring time step'''
     return stats.mode(get_deltat(t))[0][0]
+
 
 # ====================================================================================================
 def detect_gaps(t, kct=None, ltol=1.9, utol=np.inf, tolerance='relative'):
@@ -146,3 +149,19 @@ def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True, ret_idx=Fal
         return Tfill, Yfill, IDX
     else:
         return Tfill, Yfill
+
+
+def timing_summary(t, rtol=1e-05, atol=1e-08):
+    Dt = np.diff(t)
+    unqdt = np.unique(Dt)
+    msg = ''
+    if np.allclose(unqdt, Dt[0], rtol, atol):  # constant time steps
+        dt = Dt[0]
+    else:  # non-constant time steps!
+        from scipy.stats import mode
+        dt = mode(Dt)[0][0]
+        msg = ('Non-constant time steps: %i unique values between (%f, %f). '
+               'Using time-step mode: %f for all further calculations.'
+               '' % (len(unqdt), Dt.min(), Dt.max(), dt))
+
+    return dt, unqdt, msg
