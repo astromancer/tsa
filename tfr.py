@@ -16,9 +16,8 @@ from grafico.ts import axes_limit_from_data
 from grafico.misc import ConnectionMixin, mpl_connect
 from grafico.dualaxes import ReciprocalFormatter
 
-from .spectral import Spectral
+from .spectral import Spectral, resolve_nwindow, resolve_overlap
 from .smoothing import smoother
-from .spectral import resolve_nwindow, resolve_overlap
 
 
 
