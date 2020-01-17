@@ -144,7 +144,7 @@ def get_nocc(N, wsize, overlap):
     times that the index corresponding to that element would be repeated in
     the strided array.
     """
-    from recipes.list import count_repeats, sortmore
+    from recipes.containers.lists import count_repeats, sortmore
 
     I = fold(np.arange(N), wsize, overlap).ravel()
     if np.ma.is_masked(I):

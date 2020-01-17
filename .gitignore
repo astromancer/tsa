@@ -6,7 +6,7 @@
 *.bak
 *.pro
 
-# dev stuff
+# dev
 spectral.[0-9]*.py
 spectral_comp*
 tfr.[0-9].py
@@ -15,4 +15,4 @@ cl_bean.py
 cl_subcmp.py
 clean.py
 lc.py
-
+filters.py

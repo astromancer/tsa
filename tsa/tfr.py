@@ -1,9 +1,9 @@
-
 import numpy as np
 import scipy
 
 import matplotlib.pyplot as plt
 import matplotlib.image as mimage
+from IPython import embed
 from matplotlib.patches import Rectangle
 from matplotlib.transforms import blended_transform_factory as btf
 from matplotlib import gridspec
@@ -12,13 +12,14 @@ from matplotlib import ticker
 # from misc.meta import
 # from superplot.spectra import formatter_factory
 
-from grafico.ts import axes_limit_from_data
-from grafico.misc import ConnectionMixin, mpl_connect
-from grafico.dualaxes import ReciprocalFormatter
+from graphing.ts import axes_limit_from_data
+from graphing.misc import ConnectionMixin, mpl_connect
+from graphing.formatters import ReciprocalFormatter
 
 from .spectral import Spectral, resolve_nwindow, resolve_overlap
 from .smoothing import smoother
 
+import more_itertools as mit
 
 
 # from recipes.string import minlogfmt
@@ -30,6 +31,8 @@ from .smoothing import smoother
 
 # TODO: plot inset of lc on hover
 # FIXME: unintended highlight when zooming.
+
+# FIXME: immediately new highlight after selection
 
 # ===============================================================================
 # FIXME: repeat code!
@@ -44,15 +47,16 @@ def format_coord_spec(x, y):
     return 'f = {:.3f}; p = {:.3f};\tPwr = {:.3g}'.format(y, p, x)
     # return 'f = {}; p = {};\ty = {}'.format( x, p, y )
 
-# def format_coord_map(x, y):
-    # x = ax.format_xdata(x)
-    # y = ax.format_ydata(y)
 
-    # p = 1. / y
-    # # f = self.time_axis.get_major_formatter().format_data_short(x)
-    #
-    # # FIXME: not formatting correctly
-    # return 'f = {:.6f}; p = {:.3f};\tPwr = {:.3f}'.format(y, p, x)
+# def format_coord_map(x, y):
+# x = ax.format_xdata(x)
+# y = ax.format_ydata(y)
+
+# p = 1. / y
+# # f = self.time_axis.get_major_formatter().format_data_short(x)
+#
+# # FIXME: not formatting correctly
+# return 'f = {:.6f}; p = {:.3f};\tPwr = {:.3f}'.format(y, p, x)
 
 # ===============================================================================
 # def logformat(x, _=None):
@@ -60,17 +64,15 @@ def format_coord_spec(x, y):
 
 # ****************************************************************************************************
 class TimeFrequencyMapBase(Spectral):
-    '''base class'''
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    """base class"""
     color_cycle = 'c', 'b', 'm', 'g', 'y', 'orange'
     lc_props = dict(color='g', marker='o', ms=1.5, mec='None')
     spec_props = dict(color='g')
     cb_props = {}  # dict(format=ticker.FuncFormatter(logformat))
     defaults = Spectral.defaults
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, t, signal, **kws):
-        ''' '''
+        """ """
         cmap = kws.pop('cmap', 'viridis')
 
         show_lc = kws.pop('show_lc', True)  # or ('lc_props' in kws)
@@ -93,9 +95,8 @@ class TimeFrequencyMapBase(Spectral):
 
         self._need_save = False
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def setup_figure(self, show_lc=True, show_spec=True, show_info=True):
-        '''Setup figure geometry'''
+        """Setup figure geometry"""
 
         # TODO limit axes to lower 0 Hz??  OR hatch everything below this somehow
         # NOTE: You will need a custom transformation to implement this.
@@ -144,9 +145,9 @@ class TimeFrequencyMapBase(Spectral):
             ax_map = fig.add_subplot(gs[h1:-h3, :w1])
             ax_cb = fig.add_subplot(gs[-h3:, w1:])
             ax_lc = fig.add_subplot(gs[:h1, :w1],
-                                    sharex=ax_map) if show_lc    else None
+                                    sharex=ax_map) if show_lc else None
             ax_spec = fig.add_subplot(gs[h1:h2, w1:],
-                                      sharey=ax_map) if show_spec  else None
+                                      sharey=ax_map) if show_spec else None
             fig.subplots_adjust(right=0.95)  # space for cbar ticks
 
         elif show_lc and not show_spec:
@@ -155,18 +156,18 @@ class TimeFrequencyMapBase(Spectral):
             ax_map = fig.add_subplot(gs[h1:-h3, :w1])
             ax_cb = fig.add_subplot(gs[h1:, w1:])
             ax_lc = fig.add_subplot(gs[:h1, :w1],
-                                    sharex=ax_map) if show_lc    else None
+                                    sharex=ax_map) if show_lc else None
             ax_spec = fig.add_subplot(gs[h1:h2, w1:],
-                                      sharey=ax_map) if show_spec  else None
+                                      sharey=ax_map) if show_spec else None
         else:
             w1, _ = 98, 2
             h1, h2, h3 = 0, 100, 0
             ax_map = fig.add_subplot(gs[h1:-h3, :w1])
             ax_cb = fig.add_subplot(gs[h1:, w1:])
             ax_lc = fig.add_subplot(gs[:h1, :w1],
-                                    sharex=ax_map) if show_lc    else None
+                                    sharex=ax_map) if show_lc else None
             ax_spec = fig.add_subplot(gs[h1:h2, w1:],
-                                      sharey=ax_map) if show_spec  else None
+                                      sharey=ax_map) if show_spec else None
 
             # add the subplots
             # ax_map  = fig.add_subplot(gs[h1:-h3, :w1])
@@ -175,9 +176,6 @@ class TimeFrequencyMapBase(Spectral):
             # sharex=ax_map)    if show_lc    else None
             # ax_spec = fig.add_subplot(gs[h1:h2, w1:],
             # sharey=ax_map)    if show_spec  else None
-
-
-
 
         # options for displaying various parts
         minorTickSize = 8
@@ -223,11 +221,10 @@ class TimeFrequencyMapBase(Spectral):
             axp.yaxis.set_major_formatter(ReciprocalFormatter())
             axp.yaxis.set_tick_params(left='off', labelleft='off')
             ax_spec.yaxis.set_tick_params(left='off', labelleft='off')
-            #TODO: same tick positions
+            # TODO: same tick positions
 
             ax_spec.yaxis.set_label_position('right')
             ax_spec.set_ylabel('Period (s)', labelpad=40)
-
 
             # ax_spec.set_xlabel(cb_lbl, labelpad=25)
             ax_spec.grid()
@@ -243,12 +240,11 @@ class TimeFrequencyMapBase(Spectral):
 
         return fig, (ax_map, ax_lc, ax_spec, ax_cb)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def plot(self, axes, t, signal, cmap, lc_props={}, spec_props={}):
-        ''' '''
+        """ """
         ax_map, ax_lc, ax_spec, ax_cb = axes
         tms, frq, P = self.tms, self.frq, self.power
-        #P /= P.mean(1)[:, None]
+        # P /= P.mean(1)[:, None]
         valid = frq > self.fRayleigh
         # NOTE: we intentionally do not mask values below fRayleigh, even though
         # they are not physicaly meaningful because this often leads to the
@@ -277,6 +273,7 @@ class TimeFrequencyMapBase(Spectral):
         # alpha[:,narrow_gap_inds+1] = 0.25
 
         # print( t.shape, frq.shape, data.shape )
+        # embed()
         im.set_data(tms, frq, P.T)
         ax_map.images.append(im)
         # ax_map.set_xlim( t[0],t[-1] )
@@ -300,20 +297,21 @@ class TimeFrequencyMapBase(Spectral):
 
         if ax_spec:
             # Plot spectrum (median & inter-quartile range)
-            quartiles = np.array(self.spec_quant) * 100 #(25, 50, 75)
+            quartiles = np.array(self.spec_quant) * 100  # (25, 50, 75)
             Pm_lci, Pm, Pm_uci = np.percentile(P, quartiles, 0)
             self.pwr_p25, self.pwr_p50, self.pwr_p75 = Pm_lci, Pm, Pm_uci
 
             sm = 5
             ax_spec.plot(smoother(Pm, sm), frq, **spec_props)
 
-            ax_spec.plot(smoother(Pm_lci, sm), frq, ':', smoother(Pm_uci, sm), frq, ':', **spec_props)
-            #HACK
+            ax_spec.plot(smoother(Pm_lci, sm), frq, ':', smoother(Pm_uci, sm),
+                         frq, ':', **spec_props)
+            # HACK
             # ax_spec.plot(smoother(self.pwr_p75, 5), frq, '-', **spec_props)
 
             ax_spec.set_xlim(Plim)
             ax_spec.set_ylim(frq[0], frq[-1])
-            self._parasite.set_ylim(frq[0], frq[-1])        # FIXME
+            self._parasite.set_ylim(frq[0], frq[-1])  # FIXME
 
             # ax_spec.set_xscale('log')
 
@@ -321,7 +319,8 @@ class TimeFrequencyMapBase(Spectral):
             rinv = Rectangle((0, 0), 1, self.fRayleigh,
                              facecolor='none', edgecolor='r',
                              linewidth=1, hatch='\\',
-                             transform=btf(ax_spec.transAxes, ax_spec.transData))
+                             transform=btf(ax_spec.transAxes,
+                                           ax_spec.transData))
             ax_spec.add_patch(rinv)
 
             # show colourbar
@@ -331,18 +330,20 @@ class TimeFrequencyMapBase(Spectral):
                                                    cax=ax_cb,
                                                    orientation='horizontal',
                                                    **self.cb_props)
-            ax_cb.set_xlabel(tmp)  # redo the labels (which the previous line would have killed)
+            ax_cb.set_xlabel(tmp)
+            # redo the labels (which the previous line would have killed)
 
             # connect callbacks for limit change
             ax_spec.callbacks.connect('xlim_changed', self._set_clim)
             ax_spec.callbacks.connect('ylim_changed', self._set_parasite_ylim)
 
         else:
-            #TODO: 'setup alt cbar'
+            # TODO: 'setup alt cbar'
             tmp = ax_cb.get_ylabel()
-            self.colour_bar = self.figure.colorbar(im, cax=ax_cb, **self.cb_props) # ticks=ax_spec.get_xticks(),
-            ax_cb.set_ylabel(tmp)          # set the labels (which the previous line killed)
-
+            self.colour_bar = self.figure.colorbar(im, cax=ax_cb,
+                                                   **self.cb_props)  # ticks=ax_spec.get_xticks(),
+            ax_cb.set_ylabel(
+                    tmp)  # set the labels (which the previous line killed)
 
         # TODO: MOVE TO SUBCLASS ?
         ax_map.callbacks.connect('xlim_changed', self.save_background)
@@ -356,7 +357,8 @@ class TimeFrequencyMapBase(Spectral):
         print('SAVING BG')
         self.background = self.canvas.copy_from_bbox(self.figure.bbox)
 
-    def _set_parasite_ylim(self, ax):      # FIXME: obviate by using TimeFreqDualAxes
+    def _set_parasite_ylim(self,
+                           ax):  # FIXME: obviate by using TimeFreqDualAxes
         print('_set_parasite_ylim', ax.get_ylim())
         self._parasite.set_ylim(ax.get_ylim())
         print('YO')
@@ -366,7 +368,6 @@ class TimeFrequencyMapBase(Spectral):
         self._need_save = True
         print('Done')
 
-
     def _set_clim(self, ax):
         print('_set_clim', ax.get_ylim())
         xlim = ax.get_xlim()
@@ -375,14 +376,15 @@ class TimeFrequencyMapBase(Spectral):
         self._need_save = True
         # self.save_background()
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def info_text(self):
         # TODO: include etc...
 
         info = ('$\Delta t = %.3f$ s ($f_s = %.3f$ Hz)' % (self.dt, self.fs),
-                'window = %s' % (self.opts.window, ),
-                '$n_w = %d$ (%.1f s)' % (self.opts.nwindow, self.opts.nwindow * self.dt),
-                '$n_{ovr} = %d$ (%.0f%%)' % (self.noverlap, self.noverlap / self.nwindow * 100),
+                'window = %s' % (self.opts.window,),
+                '$n_w = %d$ (%.1f s)' % (
+                    self.opts.nwindow, self.opts.nwindow * self.dt),
+                '$n_{ovr} = %d$ (%.0f%%)' % (
+                    self.noverlap, self.noverlap / self.nwindow * 100),
                 )
         if self.opts.pad:
             info += ('pad = %s' % str(self.opts.pad),)
@@ -392,7 +394,6 @@ class TimeFrequencyMapBase(Spectral):
         txt = '\n'.join(info)
         self.infoText = self.ax_info.text(0.05, 1, txt, va='top',
                                           transform=self.ax_info.transAxes)
-
 
     def mapCoordDisplayFormatter(self, x, y):
 
@@ -409,50 +410,71 @@ class TimeFrequencyMapBase(Spectral):
 
 # ****************************************************************************************************
 class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
-    '''
+    """
     Time Frequency Representation (aka Power Spectral density map)
     Interactive plot elements live in this class
-    '''
+    """
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    _span_lc_props = dict(alpha=0.35)
+    _span_map_props = dict(facecolor='none',
+                           lw=1,
+                           ls='--')
+    _ispec_prop = dict(alpha=0.65,
+                       lw=1.5)
+
     def __init__(self, t, signal, **kws):
-        ''' '''
-        self.smoothing = kws.pop('smoothing', 0)  # smoothing for displayed segment spectrum
+        """ """
+        self.smoothing = kws.pop('smoothing',
+                                 0)  # smoothing for displayed segment spectrum
         TimeFrequencyMapBase.__init__(self, t, signal, **kws)
-        self.scaling = 1. / self.pwr_p50.sum()   # scale segment spectrum to sum of median (for display)
+        # scale segment spectrum to sum of median (for display)
+        self.scaling = 1. / self.pwr_p50.sum()
 
         # initialize auto-connect
         ConnectionMixin.__init__(self, self.figure)
 
         # save background for blitting
-        #self.canvas.draw()
-        #self.save_background()
+        # self.canvas.draw()
+        # self.save_background()
 
-        # TODO: can you subclass widgets.cursor to emulate the desired behaviour??
+        # TODO: can you subclass widgets.cursor to emulate  desired behaviour??
         self.hovering = False
         self.icolour = iter(self.color_cycle)
-        self.spans = []  # container for highlighted segments
+        self.spans_lc = []  # container for highlighted segments
+        self.spans_map = []
         self.spectra = []
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def plot(self, axes, t, signal, cmap, lc_props={}, spec_props={}):
 
-        TimeFrequencyMapBase.plot(self, axes, t, signal, cmap, lc_props, spec_props)
+        TimeFrequencyMapBase.plot(self, axes, t, signal, cmap, lc_props,
+                                  spec_props)
 
         # Initiate elements for interactive display
         # TODO: only really need these upon connect
-        self.ispec, = self.ax_spec.plot([], [], 'r', alpha=0.65)  # instantaneous spectum
+        # instantaneous spectrum
+        self.ispec, = self.ax_spec.plot([], [], 'r', **self._ispec_prop)
 
+        # window indicator on light curve axes
         # TODO:  Alpha channel for window shape
-        self.span_transform = btf(self.ax_lc.transData, self.ax_lc.transAxes)
-        self.span = Rectangle((0, 0), 0, 1,
-                              color='r', alpha=0.35,
-                              transform=self.span_transform)
-        self.ax_lc.add_patch(self.span)
+        self.span_lc_transform = btf(self.ax_lc.transData,
+                                     self.ax_lc.transAxes)
+        self.span_lc = Rectangle((0, 0), 0, 1,
+                                 color='r',
+                                 **self._span_lc_props,
+                                 transform=self.span_lc_transform)
+        self.ax_lc.add_patch(self.span_lc)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # window indicator on map axes
+        self.span_map_transform = btf(self.ax_map.transData,
+                                      self.ax_map.transAxes)
+        self.span_map = Rectangle((0, 0), 0, 1,
+                                  edgecolor='r',
+                                  **self._span_map_props,
+                                  transform=self.span_map_transform)
+        self.ax_map.add_patch(self.span_map)
+
     def get_spectrum(self, ix, smoothing=0, scaling=1.):  # misnomer?
-        ''' '''
+        """ """
         data = self.power[ix]
         if smoothing:
             data = smoother(data, smoothing)
@@ -461,7 +483,6 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
 
         return np.array([data, self.frq])
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def update(self, ix):
 
         # update spectrum
@@ -469,46 +490,60 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
         self.ispec.set_data(spectrum)
 
         # update rectangle for highlighted span
-        tspan = self.t_seg[ix, (0, -1)]             # NOTE padded values not included here #TODO: maybe some visual indicator for padding??
+        tspan = self.t_seg[ix, (0, -1)]
+        # NOTE padded values not included here
+        # TODO: maybe some visual indicator for padding??
+        x = tspan[0]
         width = tspan.ptp()
-        self.span.set_x(tspan[0])
-        self.span.set_width(width)
+        self.span_lc.set_x(x)
+        self.span_lc.set_width(width)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        self.span_map.set_x(x)
+        self.span_map.set_width(width)
+
     def highlight_section(self):
         # persistent spectrum for this window
         colour = next(self.icolour)
         spectrum = self.ispec.get_xydata().T  # instantaneous spectum
-        line, = self.ax_spec.plot(*spectrum, color=colour, alpha=0.65, lw=1)
+        line, = self.ax_spec.plot(*spectrum, color=colour, **self._ispec_prop)
         self.spectra.append(line)
 
         # persistent highlight this window
-        span = Rectangle(self.span.xy, self.span.get_width(), 1,
-                         color=colour, alpha=0.35,
-                         transform=self.span_transform)
-        self.ax_lc.add_patch(span)
-        self.spans.append(span)
+        span_lc = Rectangle(self.span_lc.xy, self.span_lc.get_width(), 1,
+                            color=colour,
+                            **self._span_lc_props,
+                            transform=self.span_lc_transform)
+        self.ax_lc.add_patch(span_lc)
+        self.spans_lc.append(span_lc)
 
-        self.span.set_visible(False)
+        span_map = Rectangle(self.span_map.xy, self.span_map.get_width(), 1,
+                             edgecolor=colour,
+                             **self._span_map_props,
+                             transform=self.span_map_transform)
+        self.ax_map.add_patch(span_map)
+        self.spans_map.append(span_map)
+
+        self.span_map.set_visible(False)
+        self.span_lc.set_visible(False)
         self.ispec.set_visible(False)
         self.draw_blit()
 
         renderer = self.figure._cachedRenderer
         line.draw(renderer)
-        span.draw(renderer)
+        span_lc.draw(renderer)
+        span_map.draw(renderer)
         self.save_background()
         self.draw_blit()
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def draw_blit(self):
         renderer = self.figure._cachedRenderer
         self.canvas.restore_region(self.background)
         self.ispec.draw(renderer)
-        self.span.draw(renderer)
+        self.span_lc.draw(renderer)
+        self.span_map.draw(renderer)
 
         self.canvas.blit(self.figure.bbox)
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # @mpl_connect( 'draw_event' )
         # def _on_draw(self, event):
         # print( 'drawing:', event )
@@ -518,7 +553,6 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
         return not (event.inaxes == self.ax_map and
                     self.canvas.manager.toolbar._active is None)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @mpl_connect('motion_notify_event')
     def _on_motion(self, event):
         if event.inaxes != self.ax_map:
@@ -528,7 +562,6 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
         self.update(ix)
         self.draw_blit()
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @mpl_connect('axes_enter_event')
     def _enter_axes(self, event):
         # print('enter')
@@ -543,22 +576,22 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
 
             self.hovering = True
 
-            self.span.set_visible(True)
+            self.span_lc.set_visible(True)
+            self.span_map.set_visible(True)
             self.ispec.set_visible(True)
             self.draw_blit()
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @mpl_connect('axes_leave_event')
     def _leave_axes(self, event):
         # print('leave')
         if event.inaxes == self.ax_map:
-            self.span.set_visible(False)
+            self.span_lc.set_visible(False)
+            self.span_map.set_visible(False)
             self.ispec.set_visible(False)
             self.draw_blit()
 
             self.hovering = False
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @mpl_connect('button_press_event')
     def _on_button(self, event):
         # print(event.button)
@@ -570,38 +603,35 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
         if event.button == 2:  # restart on middle mouse
             self.restart()
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @mpl_connect('key_press_event')
     def _on_key(self, event):
         print(event.key)
-
 
     @mpl_connect('draw_event')
     def _on_draw(self, event):
         print('DRAWING', event)
         if self._need_save:
-            self.save_background()      # DOESN'T work since it gets executed before the draw is complete
+            self.save_background()
+            # DOESN'T work since it gets executed before the draw is complete
             self._need_save = False
 
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def restart(self):
-        self.span.set_visible(False)
+        self.span_lc.set_visible(False)
+        self.span_map.set_visible(False)
         self.ispec.set_visible(False)
 
         # reset colour cycle
         self.icolour = iter(self.color_cycle)
-        for span, spec in zip(self.spans, self.spectra):
-            span.remove()
-            spec.remove()
+        for art in mit.flatten([self.spans_lc, self.spans_map, self.spectra]):
+            art.remove()
 
-        self.spans = []
+        self.spans_lc = []
+        self.spans_map = []
         self.spectra = []
 
         self.canvas.draw()
         self.background = self.canvas.copy_from_bbox(self.figure.bbox)
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # def connect(self):
         # self.canvas.mpl_connect( 'motion_notify_event', self._on_motion )
         # self.canvas.mpl_connect( 'axes_enter_event', self._enter_axes )
@@ -610,13 +640,35 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
 
 TimeFrequencyRepresentation = TimeFrequencyMap
 
+from .spectral import normaliser
+
+
+class SpectralAudio(TimeFrequencyMap):
+    def __init__(self, t, signal, **kws):
+        TimeFrequencyMap.__init__(self, t, signal, **kws)
+
+    def main(self, segments):  # calculate_spectra
+        # calculate spectra
+        spec = scipy.fftpack.fft(segments)
+        spec = spec[...,
+               :len(self.frq)]  # since we are dealing with real signals
+        self.spectra = spec
+        power = np.square(np.abs(spec))
+        power = normaliser(power, self.segments, self.opts.normalise, self.dt,
+                           self.npadded)
+        return power
+
+    def resample_segment(self, ix, duration):
+        ''
+
+    def play_segment(self, ix):
+        ix = abs(self.tms - t).argmin()
+
 
 # ****************************************************************************************************
 class SpectralCoherenceMap(TimeFrequencyMapBase):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, t, signalA, signalB, **kws):
         show_lc = kws.pop('show_lc', False)  # or ('lc_props' in kws)
         lc_props = TimeFrequencyMapBase.lc_props.copy()
@@ -644,13 +696,15 @@ class SpectralCoherenceMap(TimeFrequencyMapBase):
         t, signalA = self.prepare_signal(t, signalA, self.dt)
         t, signalB = self.prepare_signal(t, signalB, self.dt)
 
-        self.nwindow = resolve_nwindow(self.opts.nwindow, self.opts.split, t, self.dt)
+        self.nwindow = resolve_nwindow(self.opts.nwindow, self.opts.split, t,
+                                       self.dt)
         self.noverlap = resolve_overlap(self.nwindow, self.opts.noverlap)
         self.fRayleigh = 1. / (self.nwindow * dt)
 
         # fold
         self.t_seg, self.segAraw = self.get_segments(t, signalA, dt,
-                                                     self.nwindow, self.noverlap)
+                                                     self.nwindow,
+                                                     self.noverlap)
         _, self.segBraw = self.get_segments(t, signalB, dt,
                                             self.nwindow, self.noverlap)
 
@@ -672,12 +726,13 @@ class SpectralCoherenceMap(TimeFrequencyMapBase):
         # plot stuff
         fig, axes = self.setup_figure(show_lc, show_spec)
         self.ax_map, self.ax_lc, self.ax_spec, self.ax_cb = axes
-        self.plot(axes, t, signalA, cmap, lc_props, spec_props)  # FIXME: signalB
+        self.plot(axes, t, signalA, cmap, lc_props,
+                  spec_props)  # FIXME: signalB
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def main(self, segA, segB):
         specA = scipy.fftpack.fft(segA)
-        specA = specA[..., :len(self.frq)]  # since we are dealing with real signals
+        specA = specA[...,
+                :len(self.frq)]  # since we are dealing with real signals
         specB = scipy.fftpack.fft(segB)
         specB = specB[..., :len(self.frq)]
 

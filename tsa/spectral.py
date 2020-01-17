@@ -1,25 +1,40 @@
-'''
-Tools for spectral estimation
-'''
+"""# TODO:
+Tools for frequency spectral estimation (aka Fourier Analysis)
+"""
 
+# TODO: separate module
+# TODO: subclass for LS TFR
+# TODO methods for non-uniform window length??
+# TODO: functions for plotting segments etc...
 # TODO: unit tests!!!
+# TODO: logging
+
+
 
 import functools
 import warnings
 
 import numpy as np
 import scipy
-
-from recipes.dict import AttrDict
-from .gaps import fill_gaps, get_deltat_mode  # , windowed
-from . import windowing, fold, detrending
-
 from IPython import embed
+from recipes.containers.dict import AttrDict
+
+from . import windowing, fold, detrending
+from .gaps import fill_gaps, get_delta_t_mode  # , windowed
 
 
-# ====================================================================================================
+def periodogram(signal, norm=None, dt=None):
+    """
+    Compute FFT power (aka periodogram). optionally normalize and or detrend
+    """
+    pwr = abs(np.fft.rfft(signal)) ** 2  # Power
+    return normaliser(pwr, signal, norm, dt)
+
+
 def FFTpower(y, norm=0, detrend=()):
-    '''Compute FFT power (aka periodogram). optionally normalize and or detrend'''
+    """
+    Compute FFT power (aka periodogram). optionally normalize and or detrend
+    """
 
     y = detrending.detrend(y, *detrend)
     sp = abs(np.fft.rfft(y)) ** 2  # Power
@@ -30,21 +45,16 @@ def FFTpower(y, norm=0, detrend=()):
     return sp
 
 
-periodogram = FFTpower
-
-
-# ====================================================================================================
 def FFTpowers(data, detrend=None):
-    '''
-    Single-Sided Amplitude Spectrum of y(t). Multiprocessing implimentation
+    """
+    Single-Sided Amplitude Spectrum of y(t). Multiprocessing implementation
     NOTE: This assumes evenly sampled data!
-    '''
+    """
     import multiprocessing as mp
     func = functools.partial(FFTpower, detrend=detrend)
 
-    pool = mp.Pool()
-    specs = pool.map(func, data)
-    pool.close()
+    with mp.Pool() as pool:
+        specs = pool.map(func, data)
     pool.join()
 
     return np.array(specs)
@@ -56,20 +66,23 @@ def FFTpowers(data, detrend=None):
 
 ########################################################################################################################
 class Spectral(object):
-    '''Spectral estimation routines'''
+    """
+    Spectral estimation routines:
+    Periodogram / spectrogram (DFT / STFT) with optional tapering, de-trending, padding, and gap-filling
+    """
 
     allowed_vals = dict(  # use=('ls', 'fft'),
-        timescale=('h', 's'),
-        # pad=('constant', 'mean', 'median', 'minimum',
-        #      'maximum', 'reflect', 'symmetric', 'wrap',
-        #      'linear_ramp', 'edge'),
-        normalise=(True, False, 'rms', 'leahy', 'leahy density'), )
+            timescale=('h', 's'),
+            # pad=('constant', 'mean', 'median', 'minimum',
+            #      'maximum', 'reflect', 'symmetric', 'wrap',
+            #      'linear_ramp', 'edge'),
+            normalise=(True, False, 'rms', 'leahy', 'leahy density'), )
 
     defaults = AttrDict(use='fft',
                         timescale='s',
                         split=None,
                         detrend=None,
-                        pad=None,  # 'mean',     #effectively a 0 pad after mean de-trend...
+                        pad=None,  # 'mean',     # effectively a 0 pad after mean de-trend...
                         gaps=None,
                         window='boxcar',
                         nwindow=None,
@@ -77,7 +90,7 @@ class Spectral(object):
                         dt=None,
                         fs=None,
                         normalise='rms', )
-    # translation
+    # translation #                           _alias_map
     dictionary = dict(apodize='window',
                       apodise='window',
                       taper='window',
@@ -92,18 +105,26 @@ class Spectral(object):
     valdict = dict(hours='h', hour='h',
                    seconds='s', sec='s')
 
-    # ====================================================================================================
+    @classmethod
+    def translate(cls, kws):
+        nkws = {}
+        for key, val in kws.items():
+            if key in cls.dictionary:
+                key = cls.dictionary[key]
+            nkws[key.lower()] = val
+        return nkws
+
     # def use_ls(self, opt):
     #     return opt.lower() in ('lomb-scargle', 'lombscargle', 'ls')
     #
     # def use_fft(self, opt):
     #     return opt.lower() in ('ft', 'fourier', 'fft')
 
-    # ====================================================================================================
-    def __init__(self, *args, **kws):  # TODO: this should be a call method
+    def __init__(self, *args, **kws):
+        # TODO: this should be a call method - initialize in __init__.py??
         # TODO: update docstring
         # otherwise sample spacing / frequency will suffice
-        '''
+        """
         Compute frequency power spectrum or Time Frequency representation (TFR).
 
         Parameters
@@ -113,7 +134,7 @@ class Spectral(object):
             (t, signal)    - in which case
         signal  :       array-like
             values for which to compute power spectrum / TFR
-        '''
+        """
 
         # If 'split' is a number, split the sequence into that number of roughly
         # equal portions. If split is a list, split the array according to the
@@ -133,15 +154,15 @@ class Spectral(object):
 
         # timing stats
         self.dt, self.fs = self.check_timing(t, self.opts)
+        self.T = self.dt * len(signal)  # NOTE: assumes even sampling
+        self.df = 1 / self.T
 
         # clean masked, fill gaps etc
-
-        # embed()
         # try:
         t, signal = self.prepare_signal(signal, t, self.dt)
         # except Exception as err:
-            # embed()
-            #raise err
+        # embed()
+        # raise err
         self.nwindow = resolve_nwindow(self.opts.nwindow, self.opts.split, t, self.dt)
         self.noverlap = resolve_overlap(self.nwindow, self.opts.noverlap)
         self.fRayleigh = 1. / (self.nwindow * self.dt)
@@ -149,6 +170,7 @@ class Spectral(object):
         # fold
         self.t_seg, signal_seg = self.get_segments(signal, t, self.dt,
                                                    self.nwindow, self.noverlap)
+        self.n_seg = len(signal_seg)
 
         self.raw_seg = signal_seg
         # median time for each section
@@ -161,23 +183,14 @@ class Spectral(object):
         nw = self.npadded or self.nwindow
         self.frq = np.fft.rfftfreq(nw, self.dt)
         self.ohm = 2. * np.pi * self.frq  # angular frequencies
+        self.n_frq = len(self.frq)
 
         # calculate spectra
         self.power = self.main(self.segments)
         self.normed = self.opts.normalise
 
-    # ====================================================================================================
-    def translate(self, kws):
-        nkws = {}
-        for key, val in kws.items():
-            if key in self.dictionary:
-                key = self.dictionary[key]
-            nkws[key.lower()] = val
-        return nkws
-
-    # ====================================================================================================
     def check(self, t, signal, **kws):
-        '''Checks'''
+        """Checks"""
         if len(t) == 0:
             assert len(t) == len(signal)
 
@@ -193,8 +206,7 @@ class Spectral(object):
                                'are allowed: %s')
                     raise ValueError(borkmsg % (kws[key], key, allowed_vals))
 
-    # ====================================================================================================
-    def check_timing(self, t, opts):
+    def check_timing(self, t, opts):  # TODO: as function...
 
         dt = opts.dt
         fs = opts.get('fs')
@@ -211,10 +223,14 @@ class Spectral(object):
             if np.allclose(Dt, Dt[0]):  # TODO: include tolerance value         # constant time steps
                 dt = Dt[0]
             else:  # non-constant time steps!
-                unqdt = np.unique(Dt)
-                dt = get_deltat_mode(t)
+                from scipy.stats import mode
+
+                unqdt = np.unique(Dt) # Fixme: us mr!? mode, counts = mr
+                np.diff(t)
+                mr = mode(Dt)
+                dt = mr.mode
                 if len(unqdt) > 10:
-                    info = '%i unique values between (%f, %f). ' % (len(unqdt), Dt.min(), Dt.max())
+                    info = '%i unique values between (%f, %f)' % (len(unqdt), Dt.min(), Dt.max())
                 else:
                     info = str(unqdt)
                 msg = ('Non-constant time steps: %s. '
@@ -226,7 +242,6 @@ class Spectral(object):
         fs = 1. / dt
         return dt, fs
 
-    # ====================================================================================================
     def prepare_signal(self, signal, t, dt):
 
         is_masked = np.ma.is_masked(signal)
@@ -248,7 +263,6 @@ class Spectral(object):
 
         return t, signal
 
-    # ====================================================================================================
     def get_segments(self, signal, t, dt, nwindow, noverlap):
         # fold
 
@@ -262,22 +276,29 @@ class Spectral(object):
                 t_seg = t_ + tstep[None].T
             else:
                 # NOTE: unnecessary for uniform sample spacing
-                leftover = (len(t) - noverlap) % step
-                end_time = t[-1] + dt * (step - leftover)
-                t_seg = fold.fold(t, nwindow, noverlap,
-                                  pad='linear_ramp',
-                                  end_values=(end_time,))
+                # leftover = (len(t) - noverlap) % step
+                # end_time = t[-1] + dt * (step - leftover)
+                # t_seg = fold.fold(t, nwindow, noverlap,
+                #                   pad='linear_ramp',
+                #                   end_values=(end_time,))
+
+                t_seg = fold.fold(t, nwindow, noverlap)
+
+
         else:
             raise NotImplementedError
             # self.t_seg          = np.split(t, self.opts.split)
             # self.raw_seg        = np.split(signal, self.opts.split)
 
+        # embed()
+        # assert t_seg.shape == signal.shape
+
         return t_seg, signal_seg
 
-    # ====================================================================================================
     def prepare_segments(self, segments):
 
-        detrend_method, detrend_order, detrend_opt = resolve_detrend(self.opts.detrend)
+        detrend_method, detrend_order, detrend_opt = \
+            resolve_detrend(self.opts.detrend)
 
         # conversion factor for dt to timing array passed to this function
         # conv_fact = {'s' : 1,
@@ -292,7 +313,8 @@ class Spectral(object):
             self.npadded = npad
             extra = npad - self.nwindow
 
-            # this does pre- AND post padding # WARNING: does this mess with the phase??
+            # this does pre- AND post padding
+            #  WARNING: does this mess with the phase??
             div, mod = divmod(extra, 2)
             pad_width = ((0, 0), (div, div + mod))
             # pad_width = ((0, 0),(0, apodise - self.nwindow)
@@ -306,66 +328,107 @@ class Spectral(object):
 
         return segments
 
-    # ====================================================================================================
     def main(self, segments):  # calculate_spectra
         # calculate spectra
+
+        # NOTE: you can probs use the periodogram function here
+
         spec = scipy.fftpack.fft(segments)
         spec = spec[..., :len(self.frq)]  # since we are dealing with real signals
         power = np.square(np.abs(spec))
-        power = normaliser(power, self.segments, self.opts.normalise,
-                           self.npadded, self.dt)
+        power = normaliser(power, self.segments, self.opts.normalise, self.dt, self.npadded)
         return power
 
-    # ====================================================================================================
     # def get_nfft(self, ):
 
-    # ====================================================================================================
     def __iter__(self):
-        '''enable use case: f, P = Spectral(t, s)'''
+        """enable use case: f, P = Spectral(t, s)"""
         return iter((self.frq, self.power))
 
 
-# TODO: subclass for LS TFR
-# TODO methods for non-uniform window length??
-# TODO: functions for plotting segments etc...
+def get_unit(how, unit=None):
+    hz_1 = '/ Hz'  # $ '$Hz^{-1}$'
+    density_unit = ' '.join(filter(None, (hz_1, unit)))
+    units = {'rms': '(rms/mean)$^2$ %s) ' % hz_1,
+             'leahy': unit,
+             'pds': density_unit,
+             'leahy density': density_unit
+             }
+
+    u = units.get(how, None)
+    if not u:
+        raise ValueError('')
+
+    return u
+
 
 # ====================================================================================================
-def normaliser(power, segments, how, nwindow, dt):
-    ''' '''
+def normaliser(power, segments, how=None, dt=None, nwindow=None, unit=None):
+    """
+    Normalise periodogram(s)
+
+    see:
+    Leahy 1983: http://adsabs.harvard.edu/full/1983ApJ...272..256L
+    """
+
+    # TODO: return unit
+
     if how is False:
+        return power
+
+    # NOTE: First We normalise the fft such that Parceval's theorem holds true.
+    # The factor 2 below comes from the fact that the signal is real (one-sided)
+    #  - we ignore half the points. However, we do not need to double the DC
+    # component, and in the case of even number of frequencies, the last point
+    # (which is unpaired Nyquist freq)
+    if nwindow is None:
+        nwindow = segments.shape[-1]
+
+    end = None if (nwindow % 2) else -1
+    power[1:end] *= 2
+    # can check Parceval's theorem here
+
+    if how is None:  # default
         return power
 
     if how is True:
         how = 'rms'
 
     if not isinstance(how, str):
-        raise ValueError
+        raise ValueError('Unknown normalisation %r requested' % how)
 
     how = how.lower()
-    # NOTE: each segment will be normalized individually
-    Nph = np.c_[segments.sum(1)]
-    # Nph = signal.sum()                 #N_{\gamma} in Leahy 83 = DC component of FFT
-    # N = len(signal)
 
-    # NOTE: factor 2 below comes from the fact that the signal is real (one-sided)
-    # However, we do not need to double the DC component, and in the case of even
-    # number of frequencies, the last point (which is unpaired Nyquist freq)
-    end = None if (nwindow % 2) else -1
-    power[1:end] *= 2
+    # NOTE: each segment will be normalized individually
+    # Nph = signal.sum()
+    # #N_{\gamma} in Leahy 83 = DC component of FFT
+
+    Nph = np.c_[segments.sum(-1)]  #
+    # N = segments.shape[1]def
+
+    # print(Nph, nwindow, dt)
 
     # FIXME: are you including the power of the window function?????
-    scale = 1
     if how == 'leahy':
-        scale = 1 / Nph
+        return np.squeeze((2 / Nph) * power)
 
-    T = nwindow * dt  # total time per segment #TODO: what if this changes per segment??
+    if dt is None:
+        raise ValueError('Require sampling time to normalise as density / rms')
+
+    # TODO: can pass either T, df, or (n, dt)
+    # total time per segment    #TODO: what if this changes per segment??
+    T = nwindow * dt  # frequency step is 1/T
+
+    if how in ('power density', 'pds'):
+        return np.squeeze(T * power)
+
     if how == 'leahy density':
-        scale = T / Nph
+        return np.squeeze((2 * T / Nph) * power)
 
     if how == 'rms':
-        scale = T / Nph ** 2
+        return np.squeeze((2 * T / Nph ** 2) * power)
 
-    return scale * power
+    raise ValueError('Unknown normalisation %r requested' % how)
 
 
 normalizer = normaliser
@@ -381,7 +444,7 @@ def resolve_nwindow(nwindow, split, t, dt):
         else:  # if split values are passed explicitly as a sequence
             # split at specific indeces
             'check that split is the correct format'
-            # NOTE: handeling this case complicates things because segments
+            # NOTE: handling this case complicates things because segments
             # no longer be uniform length. Better to delegate this to case
             # separate mainloop
             raise NotImplementedError
@@ -398,7 +461,7 @@ def resolve_nwindow(nwindow, split, t, dt):
 
 # ====================================================================================================
 def resolve_overlap(nwindow, noverlap):
-    '''convert overlap to integer value'''
+    """convert overlap to integer value"""
     if not bool(noverlap):
         return 0
 
@@ -476,10 +539,10 @@ def resolve_detrend(detrend):
 
 # ====================================================================================================
 def show_all_windows(cmap='gist_rainbow'):
-    '''
+    """
     plot all the spectral windows defined in scipy.signal (at least those that
     don't want a parameter argument.)
-    '''
+    """
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots()
@@ -496,3 +559,35 @@ def show_all_windows(cmap='gist_rainbow'):
             pass
     plt.legend()
     plt.show()
+
+
+if __name__ == '__main__':
+
+    def check_parceval(signal, periodogram):
+        # Parceval's theorem
+        tp_signal = np.square(signal).sum()
+        tp_fft = periodogram.sum() / len(signal)
+        return np.allclose(tp_signal, tp_fft)
+
+
+    def check_DC(signal, periodogram):
+        # DC component is squared signal sum
+        ss = signal.sum()
+        return (ss * ss) == periodogram[0]
+
+
+    def check_var_rms_relation(signal, periodogram):
+        """Variance of a real ts is equal the rms of the non-DC power spectrum"""
+        n = len(signal)
+        rms_pwr = periodogram[1:].sum() / (n * n)
+        var = np.var(signal)
+        return np.allclose(var, rms_pwr)
+
+
+    # check parceval for even and odd signals
+    off = 1e4
+    N = 2 ** 10
+    for n in [N, N - 1]:
+        signal = np.random.randn(n) + off
+        pwr = periodogram(signal)
+        check_parceval(signal, pwr)

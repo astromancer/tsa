@@ -7,13 +7,14 @@ from scipy.signal import get_window
 from . import fold
 from .spectral import resolve_overlap
 
+from astropy.stats import sigma_clipped_stats
 
-# from myio import warn
 
 # TODO: OCSVM, Tietjen-Moore, Topological Anomaly detection
 
+
 def generalizedESD(x, maxOLs, alpha=0.05, fullOutput=False):
-    '''
+    """
     Carry out a Generalized ESD Test for Outliers.
 
     The Generalized Extreme Studentized Deviate (ESD) test for
@@ -48,7 +49,7 @@ def generalizedESD(x, maxOLs, alpha=0.05, fullOutput=False):
         The lambda values needed to test whether a point
         should be regarded an outlier. Only provided
         if `fullOutput` is set to True.
-    '''
+    """
 
     from scipy.stats import t
     if maxOLs < 1:
@@ -56,6 +57,7 @@ def generalizedESD(x, maxOLs, alpha=0.05, fullOutput=False):
 
     xm = np.ma.array(x.copy())
     n = len(xm)
+    maxOLs = min(maxOLs, n)  # can't have more outliers than points!
 
     # Compute R-values
     R, L = [], []
@@ -66,12 +68,14 @@ def generalizedESD(x, maxOLs, alpha=0.05, fullOutput=False):
         # Find maximum deviation
         rr = np.abs((xm - xmean) / xstd)  # Malhanobis distance
         wrr = np.argmax(rr)
-        idx.append(wrr)  # index of datapoint with maximal Malhanobis distance
+        idx.append(wrr)  # index of data point with maximal Malhanobis distance
         R.append(rr[wrr])
         if i >= 1:
             p = 1.0 - alpha / (2.0 * (n - i + 1))
-            perPoint = t.ppf(p, n - i - 1)  # the 100p percentage point from the t-distribution
-            L.append((n - i) * perPoint / np.sqrt((n - i - 1 + perPoint ** 2) * (n - i + 1)))
+            perPoint = t.ppf(p, n - i - 1)
+            # the 100p percentage point from the t-distribution
+            L.append((n - i) * perPoint / np.sqrt(
+                    (n - i - 1 + perPoint ** 2) * (n - i + 1)))
         # Mask that value and proceed
         xm[idx[-1]] = np.ma.masked
 
@@ -100,113 +104,86 @@ def generalizedESD(x, maxOLs, alpha=0.05, fullOutput=False):
             return [], 0, R, L, idx
 
 
-            # ====================================================================================================
-            # def CovEstOD(data, classifier=None, threshold=0):
-            # if classifier is None:
-            # from sklearn.covariance import EllipticEnvelope
-            # classifier = EllipticEnvelope(support_fraction=1., contamination=0.1)
+# def CovEstOD(data, classifier=None, threshold=0):
+#     if classifier is None:
+#     from sklearn.covariance import EllipticEnvelope
+#     classifier = EllipticEnvelope(support_fraction=1., contamination=0.1)
+#
+#     classifier.fit(data)
+#     idx, = np.where( classifier.decision_function(data) < threshold )
+#
+#     return idx
 
-            # classifier.fit(data)
-            # idx, = np.where( classifier.decision_function(data) < threshold )
 
-            # return idx
+def CovEstOD(data, classifier=None, n=1, **kw):
+    # multivariate outlier detection
 
-
-def CovEstOD(data, classifier=None, N=1, **kw):
     if classifier is None:
         from sklearn.covariance import EllipticEnvelope
-        contamination = N / data.shape[0]
-        classifier = EllipticEnvelope(support_fraction=1., contamination=contamination)
+        contamination = n / data.shape[0]
+        classifier = EllipticEnvelope(support_fraction=1.,
+                                      contamination=contamination)
 
     classifier.fit(data)
-    clipix, = np.where(classifier.predict(data) == -1)
+    outliers, = np.where(classifier.predict(data) == -1)
 
-    wdb = kw.pop('with_decision_boundary', False)
-    # TODO:  A better way of finding the decision boundary
-    if wdb:
-        w, T = np.linalg.eigh(
-            clf.precision_)  # T (eigenvectors of precision matrix) is the transformation matrix between principle axes and data coordinates
-        Ti = np.linalg.inv(T)
-        M = np.dot(Ti,
-                   clf.precision_) * T  # Diagonalizing the precision matrix ==> quadratic representation of decision boundary (ellipse): z^T M z = threshold. where x-<x> = Tz transforms to principle axes
-        a, b = np.sqrt(clf.threshold / np.diag(M))  # semi-major & semi-minor axes
-        theta = np.degrees(np.arccos(T[0, 0]))  # T is (im)proper rotation matrix
-        theta = np.linalg.det(
-            T) * theta  # If det(T)=-1 ==> improper rotation matrix (rotoinversion - one of the axes is inverted)
-        decision_boundary = Ellipse(clf.location_, 2 * a, 2 * b, theta, color='m')
-        return clipix, decision_boundary
-    else:
-        return clipix
+    return outliers
 
+def get_ellipse(classifier, **kws):
+    from matplotlib.patches import Ellipse
 
-        # ====================================================================================================
-    # def WindowOutlierDetection(data, nwindow, noverlap, method, weight_kernel=None, recur=False, *args, **kwargs):
-    # TODO: pre-pad first window symmetrically so that there is more than one voter for the first window.
-    # TODO: Turn into a class.  + get_envelope method
-    # '''Outlier detection using moving window
-    #
-    # Parameters
-    # ----------
-    # data : np.array
-    #     The data set to be tested for outliers
-    # nwindow : int
-    #     window size
-    # noverlap : int
-    #     overlap from one window to next
-    # method : callable
-    #     function to be used for outlier detection on each window
-    # weight_kernel : str | np.array, optional
-    #     window function to weight the outlier probabilities for each window.  Default is unifrom weighting
-    # recur : boolean
-    #     whether or not to do the outlier test recursively.  Note that this may lead to erroneous results
-    #     for outlier tests that cannot be applied recursively (such as generalizedESD)
-    #     Not yet implemented
-    #
-    # Returns
-    # -------
-    # Outlier indeces : list of ints
-    # '''
+    # todo: probably check that data is 2d
 
-    # N = len(data)
-    # step = nwindow - noverlap
-    # o = (nwindow // step) + int(bool(nwindow % step))    #number of consecutive sections with repeated datapoints
-    # noc0 = np.tile( range(1,o), (step,1) ).T.ravel()
-    # lnoc0 = len(noc0)
-    # Nseg, leftover = divmod(N-noverlap, step)
-    # noc = np.r_[noc0, [o]*(Nseg*step-lnoc0), noc0[::-1]] #number of occurances of each element in strided array
-    ##(used to normalise the outlier probability)
+    w, T = np.linalg.eigh(classifier.precision_)
+    # T (eigenvectors of precision matrix) is the transformation matrix
+    # between principle axes and data coordinates
+    Ti = np.linalg.inv(T)
+    M = np.dot(Ti, classifier.precision_) * T
+    # Diagonalizing the precision matrix ==> quadratic representation of
+    # decision boundary (ellipse): z^T M z = threshold. where x-<x> = Tz
+    # transforms to principle axes
+    a, b = np.sqrt(classifier.threshold / np.diag(M))
+    # a, b are semi-major & semi-minor axes
 
-    # if weight_kernel is None:
-    # weight_kernel = 'boxcar'
-    # weights = get_window( weight_kernel, nwindow )
+    # T is (im)proper rotation matrix
+    theta = np.degrees(np.arccos(T[0, 0]))
+    theta = np.linalg.det(T) * theta
+    # If det(T)=-1 ==> improper rotation matrix (roto-inversion -
+    # one of the axes is inverted)
+    return Ellipse(classifier.location_, 2 * a, 2 * b, theta, **kws)
 
-    # S = defaultdict(float)
-    # q = fold.fold(data, nwindow, noverlap)
-
-    # for i, dat in enumerate( q ):
-    # no, idx = method(dat, *args, **kwargs)
-    # if no:
-    ##weights[idx]
-    ##ix = i*step + np.array(idx)
-    # for ii in idx:
-    # jj = i*step+ii
-    # S[jj] += weights[ii] / noc[jj]
-    ##print( 'i', i )
-    ##print( 'idx', idx )
-    ##print( 'ix', ix ) #'qi[i,ix]', qi[i,idx]
-    ##print()
-
-    ##IDX += list(ix)
-    # IDX = [idx for idx,p in S.items() if p>0.5]
-    # return IDX
-
-
-# from IPython import embed
 
 def WindowOutlierDetection(data, nwindow, noverlap, method, weight_kernel=None,
-                           return_index=False, return_mask=False, return_masked_data=False,
+                           return_index=False, return_mask=False,
+                           return_masked_data=False,
                            *args, **kwargs):  # recur=None
+    # TODO: paralellize!
+    """
+    Outlier detection using moving window
 
+    Parameters
+    ----------
+    data: array-like
+        The data set to be tested for outliers
+    nwindow: int
+        window size
+    noverlap: int
+        overlap from one window to next
+    method: callable
+        function to be used for outlier detection on each window
+    weight_kernel: str | np.array, optional
+        window function to weight the outlier probabilities for each window.
+        Default is uniform weighting.
+    return_index: bool
+    return_mask: bool
+    return_masked_data: bool
+    args
+    kwargs
+
+    Returns
+    -------
+
+    """
     if not (return_index or return_mask or return_masked_data):
         return_index = True
 
@@ -239,12 +216,19 @@ def WindowOutlierDetection(data, nwindow, noverlap, method, weight_kernel=None,
     for i, seg in enumerate(fold.fold(data, nwindow, noverlap)):
         if np.ma.is_masked(seg):
             seg = seg[~seg.mask]
-        widx = method(seg.T, *args, **kwargs)  # indeces of outliers relative to this window
+
+        if len(seg):
+            # indeces of outliers relative to this window
+            widx = method(seg.T, *args, **kwargs)
+        else:  # can be that the entire segment is masked
+            widx = []
+
         if len(widx):
             didx = i * step + np.array(widx)  # indeces relative to data
             didx = didx[didx < N]  # remove indeces that exceed array dimensions
             for ii, jj in zip(widx, didx):
-                S[jj] += weights[ii] / noc[jj]  # mean probability that points where flagged as outliers
+                S[jj] += weights[ii] / noc[jj]
+                # mean probability that points where flagged as outliers
 
     IDX = np.sort([idx for idx, p in S.items() if p > 0.5])
 
@@ -268,8 +252,14 @@ def WindowOutlierDetection(data, nwindow, noverlap, method, weight_kernel=None,
         return data
 
 
+def sigma_clip_masked(x, siglow=3, sighi=3):
+    xmean, xmed, xstd = sigma_clipped_stats(x)
+    return np.ma.masked_outside(x, xmed - siglow * xstd, xmed + sighi * xstd)
+
+
 # ====================================================================================================
-def running_sigma_clip(x, sig=3., nwindow=100, noverlap=0, iters=None, cenfunc=np.ma.median, varfunc=np.ma.var):
+def running_sigma_clip(x, sig=3., nwindow=100, noverlap=0, iters=None,
+                       cenfunc=np.ma.median, varfunc=np.ma.var):
     # TODO:  Incorporate in WindowOutlierDetection
 
     # SLOWWWWWWWWW...................
@@ -292,21 +282,23 @@ def running_sigma_clip(x, sig=3., nwindow=100, noverlap=0, iters=None, cenfunc=n
                 i += 1
                 lastrej = filtered_sec.count()
                 secdiv = filtered_sec - cenfunc(filtered_sec)
-                filtered_sec.mask |= np.ma.greater(secdiv * secdiv, varfunc(secdiv) * sig ** 2)
+                filtered_sec.mask |= np.ma.greater(secdiv * secdiv,
+                                                   varfunc(secdiv) * sig ** 2)
                 # print( filtered_sec.mask )
                 # iters = i + 1
         else:
             for i in range(iters):
                 secdiv = filtered_sec - cenfunc(filtered_sec)
-                filtered_sec.mask |= np.ma.greater(secdiv * secdiv, varfunc(secdiv) * sig ** 2)
+                filtered_sec.mask |= np.ma.greater(secdiv * secdiv,
+                                                   varfunc(secdiv) * sig ** 2)
 
         filtered_data.append(filtered_sec)
 
     return np.ma.concatenate(filtered_data)[:len(x)]
 
 
-# ====================================================================================================
-def plot_clippings(ax, t, x, tclp, xclp, med, std, threshold, nwindow=0, label='data', **kw):
+def plot_clippings(ax, t, x, tclp, xclp, med, std, threshold, nwindow=0,
+                   label='data', **kw):
     # med, v = running_stats(x, nwindow, center=False)
     # std = np.sqrt( v )
 
