@@ -3,7 +3,6 @@ import warnings
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def fold(a, wsize, overlap=0, axis=0, **kw):
     """
     segment an array at given wsize, overlap,
@@ -61,7 +60,6 @@ def rebin(x, binsize, t=None, e=None):
         return returns[0]
     return returns
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def gen(a, wsize, overlap=0, axis=0, **kw):
     """
     Generator version of fold.
@@ -78,7 +76,6 @@ def gen(a, wsize, overlap=0, axis=0, **kw):
         i += 1
 
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def padder(a, wsize, overlap=0, axis=0, **kw):
     """ """
     assert wsize > 0, 'wsize > 0'
@@ -117,7 +114,6 @@ def padder(a, wsize, overlap=0, axis=0, **kw):
     return a, int(Nseg)
 
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def get_strided_array(a, size, overlap, axis=0):
     """
     Fold array `a` along `axis` with given `size` and `overlap`. Use strides (byte-steps) for memory efficiency
@@ -137,19 +133,17 @@ def get_strided_array(a, size, overlap, axis=0):
     return as_strided(a, new_shape, new_strides)
 
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def get_nocc(N, wsize, overlap):
+def get_nocc(n, wsize, overlap):
     """
     Return an array of length N, with elements representing the number of
     times that the index corresponding to that element would be repeated in
     the strided array.
     """
-    from recipes.containers.lists import count_repeats, sortmore
+    from recipes.lists import tally, cosort
 
-    I = fold(np.arange(N), wsize, overlap).ravel()
-    if np.ma.is_masked(I):
-        I = I[~I.mask]
+    indices = fold(np.arange(n), wsize, overlap).ravel()
+    if np.ma.is_masked(indices):
+        indices = indices[~indices.mask]
 
-    d = count_repeats(I)
-    ix, noc = sortmore(*zip(*d.items()))
-    return noc
+    return cosort(*zip(*tally(indices).items()))[1]
+    

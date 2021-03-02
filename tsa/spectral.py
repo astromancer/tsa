@@ -10,14 +10,12 @@ Tools for frequency spectral estimation (aka Fourier Analysis)
 # TODO: logging
 
 
-
 import functools
 import warnings
 
 import numpy as np
 import scipy
-from IPython import embed
-from recipes.containers.dict import AttrDict
+from recipes.dicts import AttrDict
 
 from . import windowing, fold, detrending
 from .gaps import fill_gaps, get_delta_t_mode  # , windowed
@@ -82,7 +80,8 @@ class Spectral(object):
                         timescale='s',
                         split=None,
                         detrend=None,
-                        pad=None,  # 'mean',     # effectively a 0 pad after mean de-trend...
+                        pad=None,
+                        # 'mean',     # effectively a 0 pad after mean de-trend...
                         gaps=None,
                         window='boxcar',
                         nwindow=None,
@@ -163,7 +162,8 @@ class Spectral(object):
         # except Exception as err:
         # embed()
         # raise err
-        self.nwindow = resolve_nwindow(self.opts.nwindow, self.opts.split, t, self.dt)
+        self.nwindow = resolve_nwindow(self.opts.nwindow, self.opts.split, t,
+                                       self.dt)
         self.noverlap = resolve_overlap(self.nwindow, self.opts.noverlap)
         self.fRayleigh = 1. / (self.nwindow * self.dt)
 
@@ -202,8 +202,9 @@ class Spectral(object):
             if key in self.allowed_vals:
                 allowed_vals = self.allowed_vals[key]
                 if val not in allowed_vals:  # + (None, False)
-                    borkmsg = ('Option %r not recognised for keyword %r. The following values '
-                               'are allowed: %s')
+                    borkmsg = (
+                        'Option %r not recognised for keyword %r. The following values '
+                        'are allowed: %s')
                     raise ValueError(borkmsg % (kws[key], key, allowed_vals))
 
     def check_timing(self, t, opts):  # TODO: as function...
@@ -212,25 +213,28 @@ class Spectral(object):
         fs = opts.get('fs')
 
         if (dt is None) and (fs is None) and (len(t) == 0):
-            raise ValueError('Please provide one of the following: dt - sample time spacing,'
-                             'fs - sampling frequency, t - time sequence')
+            raise ValueError(
+                    'Please provide one of the following: dt - sample time spacing,'
+                    'fs - sampling frequency, t - time sequence')
 
         if fs and not dt:
             dt = 1. / fs
 
         if len(t) and (dt is None):  # sample spacing in time units
             Dt = np.diff(t)
-            if np.allclose(Dt, Dt[0]):  # TODO: include tolerance value         # constant time steps
+            if np.allclose(Dt, Dt[0]):  # TODO: include tolerance value        
+                # constant time steps
                 dt = Dt[0]
             else:  # non-constant time steps!
                 from scipy.stats import mode
 
-                unqdt = np.unique(Dt) # Fixme: us mr!? mode, counts = mr
+                unqdt = np.unique(Dt)  # Fixme: us mr!? mode, counts = mr
                 np.diff(t)
                 mr = mode(Dt)
                 dt = mr.mode
                 if len(unqdt) > 10:
-                    info = '%i unique values between (%f, %f)' % (len(unqdt), Dt.min(), Dt.max())
+                    info = '%i unique values between (%f, %f)' % (
+                        len(unqdt), Dt.min(), Dt.max())
                 else:
                     info = str(unqdt)
                 msg = ('Non-constant time steps: %s. '
@@ -256,7 +260,8 @@ class Spectral(object):
                 t, signal = fill_gaps(t, signal, dt, fillmethod, option)
 
             elif is_masked:
-                warnings.warn('Removing masked values from signal! This may not be a good idea...')
+                warnings.warn(
+                        'Removing masked values from signal! This may not be a good idea...')
                 t = t[~signal.mask]
         else:
             ''
@@ -305,11 +310,13 @@ class Spectral(object):
         # 'h' : 3600}[self.opts.timescale]
 
         # detrend
-        segments = detrending.detrend(segments, detrend_order, **detrend_opt)
+        segments = detrending.detrend(segments, detrend_method, detrend_order,
+                                      **detrend_opt)
 
         # padding
         if self.opts.pad:
-            npad, pad_method, pad_kws = resolve_padding(self.opts.pad, self.nwindow, self.dt)
+            npad, pad_method, pad_kws = resolve_padding(self.opts.pad,
+                                                        self.nwindow, self.dt)
             self.npadded = npad
             extra = npad - self.nwindow
 
@@ -334,9 +341,11 @@ class Spectral(object):
         # NOTE: you can probs use the periodogram function here
 
         spec = scipy.fftpack.fft(segments)
-        spec = spec[..., :len(self.frq)]  # since we are dealing with real signals
+        spec = spec[...,
+               :len(self.frq)]  # since we are dealing with real signals
         power = np.square(np.abs(spec))
-        power = normaliser(power, self.segments, self.opts.normalise, self.dt, self.npadded)
+        power = normaliser(power, self.segments, self.opts.normalise, self.dt,
+                           self.npadded)
         return power
 
     # def get_nfft(self, ):
@@ -488,8 +497,10 @@ def resolve_overlap(nwindow, noverlap):
 
 # ====================================================================================================
 def resolve_padding(args, nwindow, dt):
-    known_methods = ('constant', 'mean', 'median', 'minimum', 'maximum', 'reflect', 'symmetric',
-                     'wrap', 'linear_ramp', 'edge')
+    known_methods = (
+        'constant', 'mean', 'median', 'minimum', 'maximum', 'reflect',
+        'symmetric',
+        'wrap', 'linear_ramp', 'edge')
     if isinstance(args, tuple):
         size, method, *kws = args
         assert method in known_methods
@@ -501,16 +512,18 @@ def resolve_padding(args, nwindow, dt):
                 size = frac * nwindow
         size = round(size)
         if size < nwindow:
-            raise ValueError('Total padded segment length %i cannot be smaller than nwindow %i'
-                             '' % (size, nwindow))
+            raise ValueError(
+                    'Total padded segment length %i cannot be smaller than nwindow %i'
+                    '' % (size, nwindow))
 
         if not len(kws):
             kws = {}
 
         return size, method, kws
     else:
-        raise ValueError('Padding needs to be a tuple containing 1) desired signal size (int)'
-                         '2) padding method (str), 3) optional arguments for method (dict)')
+        raise ValueError(
+                'Padding needs to be a tuple containing 1) desired signal size (int)'
+                '2) padding method (str), 3) optional arguments for method (dict)')
 
 
 # ====================================================================================================

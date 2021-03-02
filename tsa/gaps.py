@@ -3,7 +3,7 @@ import itertools as itt
 import numpy as np
 from scipy import stats
 
-from recipes.containers.lists import flatten
+from recipes.lists import flatten
 
 
 def get_delta_t(t, t_cyc=np.ma.masked):
@@ -20,7 +20,7 @@ def get_delta_t(t, t_cyc=np.ma.masked):
     -------
 
     """
-    delta_t = np.ma.empty_like(t)
+    delta_t = np.ma.zeros(t.shape)  # empty_like
     delta_t[1:] = np.diff(t)
     # set the first value to the kinetic cycle time if known
     delta_t[0] = t_cyc
@@ -98,10 +98,8 @@ def detect_gaps(t, kct=None, ltol=1.9, utol=np.inf, tolerance='relative'):
     return gap_inds
 
 
-# TODO: Investigate interpolate
-# WARNING: DON'T FILL GAPS --- RATHER USE METHODS THAT DO NOT REQUIRE THIS!
 def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True,
-              ret_idx=False):  # ADD NOISE??
+              return_index=False):  # ADD NOISE??
     """ """
 
     def make_filled_array(x, fillers):
@@ -146,18 +144,17 @@ def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True,
             option = (1, 10 or option)
             # default to using 5 values on either side of gap for fitting
 
-        if mode.startswith(
-                'poly'):  # interpolate data points using a polynomial
+        if mode.startswith('poly'):
+            # infer data using a polynomial
             if isinstance(option, int):
                 n, k = option, 20
             else:
                 n, k = option  # use k data values adjacent to gap to do the fit
                 k = k or 20  # if k is None
-
-            i_l = max(0, i - k // 2);
+            # n gives degree of polynomial
+            i_l = max(0, i - k // 2)
             i_u = min(i + k // 2 + 1, len(t))
-            coeff = np.polyfit(t[i_l:i_u], y[i_l:i_u],
-                               n)  # n gives degree of polinomial fit
+            coeff = np.polyfit(t[i_l:i_u], y[i_l:i_u], n)
             y_fill = np.polyval(coeff, t_fill)
 
         elif mode == 'spline':
@@ -187,14 +184,14 @@ def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True,
         Tfill.append(t_fill)  # fill gaps in original data
         Yfill.append(y_fill)
 
-        if ret_idx:
+        if return_index:
             IDX += list(range(i + 1, i + 1 + len(t_fill)))
 
     if fill:
         Tfill = make_filled_array(t, Tfill)
         Yfill = make_filled_array(y, Yfill)
 
-    if ret_idx:
+    if return_index:
         return Tfill, Yfill, IDX
     else:
         return Tfill, Yfill

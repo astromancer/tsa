@@ -61,6 +61,8 @@ def smooth(x, wsize=11, window='hanning', fill=None, preserve_energy=False):
 
 def detrend(x, method=None, n=None, t=None, **kws):
     '''Convenience method for detrending (multiple) time series'''
+
+
     if method in (False, None):
         return x                    #TODO: log warning?
 

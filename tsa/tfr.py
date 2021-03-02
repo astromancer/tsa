@@ -3,7 +3,7 @@ import scipy
 
 import matplotlib.pyplot as plt
 import matplotlib.image as mimage
-from IPython import embed
+
 from matplotlib.patches import Rectangle
 from matplotlib.transforms import blended_transform_factory as btf
 from matplotlib import gridspec
@@ -12,8 +12,8 @@ from matplotlib import ticker
 # from misc.meta import
 # from superplot.spectra import formatter_factory
 
-from graphing.ts import axes_limit_from_data
-from graphing.misc import ConnectionMixin, mpl_connect
+from graphing.utils import get_percentile_limits
+from graphing.connect import ConnectionMixin, mpl_connect
 from graphing.formatters import ReciprocalFormatter
 
 from .spectral import Spectral, resolve_nwindow, resolve_overlap
@@ -133,8 +133,8 @@ class TimeFrequencyMapBase(Spectral):
                 self.ax_info = ax_info = fig.add_subplot(gs[:h1, w1:])
                 # ax_info.set_visible(False)
                 ax_info.patch.set_visible(False)
-                self.ax_info.tick_params('both', left='off', labelleft='off',
-                                         labelbottom='off', bottom='off')
+                self.ax_info.tick_params(left=False, labelleft=False,
+                                         bottom=False, labelbottom=False)
                 for _, spine in self.ax_info.spines.items():
                     spine.set_visible(False)
 
@@ -185,8 +185,9 @@ class TimeFrequencyMapBase(Spectral):
         # MajForm = ticker.FuncFormatter(lambda x, pos: '{:.2f}'.format(x))
         # MajForm = formatter_factory( MajForm, tolerance=0.1 )
         # ax_map.yaxis.set_major_formatter(MajForm)
-        # MinForm = ticker.FuncFormatter( lambda x, pos: '{:.1f}'.format(x).strip('0') )
-        # ax_map.yaxis.set_minor_formatter( MajForm )            #ticker.ScalarFormatter()
+        # MinForm = ticker.FuncFormatter(lambda x, pos: '{:.1f}'.format(x).strip('0') )
+        # ax_map.yaxis.set_minor_formatter( MajForm )
+        # #ticker.ScalarFormatter()
         ax_map.yaxis.set_tick_params('minor', labelsize=minorTickSize)
 
         # Coordinate display format
@@ -195,9 +196,10 @@ class TimeFrequencyMapBase(Spectral):
         # setup_ticks
         if ax_lc:
             # set major/minor xticks invisible on light curve plot
-            ax_lc.tick_params(axis='x', which='both', labelbottom=False,
-                              labeltop=True, top='on', direction='inout', pad=0)
-            # ax_lc.tick_params(axis='y', which='both', top='on')
+            ax_lc.tick_params(axis='x', which='both',
+                              labelbottom=False, labeltop=True, top=True,
+                              direction='inout', pad=0)
+            # ax_lc.tick_params(axis='y', which='both', top=True)
 
             ax_lc.set_ylabel('Flux (counts/s)')
             ax_lc.grid()
@@ -210,17 +212,17 @@ class TimeFrequencyMapBase(Spectral):
 
         if ax_spec:
             # set yticks invisible on frequency spectum plot
-            ax_spec.xaxis.set_tick_params(which='both', labelbottom=False)
-            ax_spec.yaxis.set_tick_params(which='both', labelleft=False,
-                                          direction='inout', right='on')
+            ax_spec.xaxis.set_tick_params(labelbottom=False, labelleft=False,
+                                          direction='inout', right=True)
             ax_spec.xaxis.offsetText.set_visible(False)
 
             # show Period as ticks on right spine of y
             self._parasite = axp = ax_spec.twinx()
 
+            # FIXME: ticks WRONG after zoom FUCK!
             axp.yaxis.set_major_formatter(ReciprocalFormatter())
-            axp.yaxis.set_tick_params(left='off', labelleft='off')
-            ax_spec.yaxis.set_tick_params(left='off', labelleft='off')
+            axp.yaxis.set_tick_params(left=False, labelleft=False)
+            ax_spec.yaxis.set_tick_params(left=False, labelleft=False)
             # TODO: same tick positions
 
             ax_spec.yaxis.set_label_position('right')
@@ -287,7 +289,7 @@ class TimeFrequencyMapBase(Spectral):
             # Plot light curve
             ax_lc.plot(t, signal, **lc_props)  # TODO: Uncertainties
             ax_lc.set_xlim(t[0], t[-1])
-            ax_lc.set_ylim(*axes_limit_from_data(signal, 0.1))
+            ax_lc.set_ylim(*get_percentile_limits(signal, (0, 101)))
 
         # guess reasonable colour limits
         climp = (0.25, 99.9)  # colour limits as percentile of power value
