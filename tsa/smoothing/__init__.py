@@ -8,7 +8,7 @@ def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
     # TODO:  Docstring
     # TODO: smooth (filter) in timescale (use astropy.units?)
 
-    # todo: use astropy smoother instead ??
+    # todo: compare astropy smoother ??
 
     """
     Generic smoothing routine able to handle masked arrays
