@@ -1,6 +1,9 @@
 import numpy as np
 
-from tsa.spectral import periodogram
+from tsa.spectral import Periodogram
+import pytest
+
+np.random.seed(123)
 
 
 def check_parceval(signal, periodogram):
@@ -16,7 +19,7 @@ def check_DC(signal, periodogram):
     return (ss * ss) == periodogram[0]
 
 
-def check_var_rms_relation(signal, periodogram):
+def check_var_rms(signal, periodogram):
     """
     Variance of a real time series is equal the rms of the non-DC power
     spectrum
@@ -26,11 +29,15 @@ def check_var_rms_relation(signal, periodogram):
     var = np.var(signal)
     return np.allclose(var, rms_pwr)
 
+def random_signal(n, mean):
+    return np.random.randn(n) + mean
 
-# check parceval for even and odd signals
-off = 1e4
-N = 2 ** 10
-for n in [N, N - 1]:
-    signal = np.random.randn(n) + off
-    pwr = periodogram(signal)
+@pytest.mark.parametrize(
+    'signal', [random_signal(2**10, 1e4), random_signal(2**10 - 1, 1e4)]
+)
+def test_periodogram(signal):
+    # check parceval for even and odd signals
+    frq, pwr = Periodogram(signal)
     check_parceval(signal, pwr)
+    check_DC(signal, pwr)
+    check_var_rms(signal, pwr)
