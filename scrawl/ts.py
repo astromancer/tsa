@@ -2,26 +2,29 @@
 Versatile functions for plotting time-series data
 """
 
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from cycler import cycler
 from matplotlib import ticker
 from matplotlib.transforms import Affine2D
 import numbers
+
 from .dualaxes import DualAxes, DateTimeDualAxes
-import logging
-from recipes.logging import get_module_logger
+from recipes.logging import logging, get_module_logger
 from attr import attrs, attrib as attr  # , astuple
 from recipes.dicts import AttrDict
 import matplotlib.pyplot as plt
 import itertools as itt
 
 import numpy as np
-
+import warnings as wrn
 import matplotlib as mpl
 
 from .utils import get_percentile_limits
-
+from .draggable import DraggableErrorbar
+from .ticks import OffsetLocator
 
 # TODO:
-#  alternatively make `class timeseriesPlot(Axes):` then ax.plot_ts()
+#  alternatively make `class timeseriesPlot(Axes):` then ax.errorbar()
 # NOTE: you can probs use the std plt.subplots machinery if you register your
 #  axes classes
 
@@ -39,45 +42,30 @@ from .utils import get_percentile_limits
 # from dataclasses import dataclass
 
 
+# module level logger
 logger = get_module_logger()
+logging.basicConfig()
+logger.setLevel(logging.INFO)
 
-N_MAX_TS_SAFETY = 50
 
 # Set parameter defaults
-default_cmap = 'nipy_spectral'
-default_figsize = (14, 8)
-
-defaults = AttrDict(
-    labels=(),
-    title='',
+DEFAULTS = AttrDict(
+    # labels=(),
+    # title='',
     #
-    relative_time=False,
     timescale='s',
     start=None,
 
-    # NOTE: this might get messy! Consider setting up the axes outside
-    #  and always passing?
-    ax=None,
     axes_labels=(('t (s)', ''),  # bottom and top x-axes
                  'Counts'),
     # TODO: axes_label_position: (left, right, center, <,>,^)
     twinx=None,  # Top x-axis display format
-    xscale='linear',
-    yscale='linear',
+    # xscale='linear',
+    # yscale='linear',
     plims=((0, 100),  # x-axis
            (-1, 101)),  # y-axis
-    #
-    colours=None,
-    cmap=None,  # TODO: colormap
-    #
-    show_errors='bar',
-    show_masked=False,
-    show_hist=False,
 
-    draggable=False,
-    offsets=(),
-
-    whitespace=0.025)  # TODO: x, y, upper, lower
+)  # TODO: x, y, upper, lower
 
 # Default options for plotting related stuff
 default_opts = AttrDict(
@@ -102,11 +90,21 @@ default_opts = AttrDict(
                     markerscale=3)
 )
 
-allowed_kws = list(defaults.keys())
+allowed_kws = list(DEFAULTS.keys())
 allowed_kws.extend(default_opts.keys())
 
 
 TWIN_AXES_CLASSES = {'sexa': DateTimeDualAxes}
+N_MAX_TS_PLOT = 50
+
+
+class TooManyToPlot(Exception):
+    """
+    Exception that occurs when user accidentally requests too many plots. The
+    number at which this occurs is determined by the module variable
+    `N_MAX_TS_PLOT`
+    """
+    pass
 
 
 # TODO: indicate more data points with arrows????????????
@@ -144,11 +142,11 @@ def _set_defaults(props, defaults):
 
 def check_kws(kws):
     # these are AttrDict!
-    opts = defaults.copy()
+
     dopts = default_opts.copy()
 
     invalid = set(kws.keys()) - set(allowed_kws)
-    if len(invalid):
+    if invalid:
         raise KeyError('Invalid keyword{}: {}.\n'
                        'Only the following keywords are recognised: {}'
                        ''.format('s' if len(invalid) > 1 else '',
@@ -158,8 +156,8 @@ def check_kws(kws):
         # deal with keyword args for which values are dict
         if key in dopts:
             dopts[key].update(val)
-    opts.update(kws)
-    return opts, dopts
+
+    return {**DEFAULTS, **kws}, dopts
 
 
 def is_null(x):
@@ -169,13 +167,15 @@ def is_null(x):
     # check that errors are not all masked. This sometimes happens
     # when data is read into fields where uncertainties are expected
     if np.ma.getmask(x).all():
-        logger.info(f'All uncertainties in vector are masked. Ignoring.')
+        logger.info('All data in vector are masked. Ignoring.')
         return True
 
     return False
 
 
 def is_uniform(x):
+    if is_null(x) or is1d(x):
+        return True
     return len(set(map(len, x))) == 1
 
 
@@ -183,71 +183,118 @@ def is1d(x):
     return isinstance(x[0], numbers.Real)
 
 
-def get_data(data, relative_time):
-    """parse data arguments"""
+def get_labels(labels, signals):
+    # check labels
+    if is_null(labels):
+        return []
+    if isinstance(labels, str):
+        return [labels]  # check if single label given
+    if len(labels) != len(signals):
+        wrn.warn('Number of labels does not match number of time series.')
+    return labels
 
-    times = y_err = x_err = (None,)
+
+def _parse_data(data, labels):
+
+    n = len(data)
+    if 4 < n < 1:
+        raise ValueError('Invalid number of arguments: %i' % n)
 
     # signals only
-    if len(data) == 1:
+    if n == 1:
         # Assume here each row gives individual signal for a TS
         signals = data[0]
 
-    # times, signals given
-    elif len(data) == 2:
-        times, signals = data
+        # check for structured data (dict keyed on labels and containing data)
+        if isinstance(signals, dict):
+            # labels = signals.keys()
+            # data = list(zip(*signals.values()))
+            yield from _parse_data(list(zip(*signals.values())),
+                                   list(signals.keys()))
+            return
 
-    # times, signals, y-errors given
-    elif len(data) == 3:
-        times, signals, y_err = data
+        data = (), signals
 
-    # times, signals, y-errors, x-errors given
-    elif len(data) == 4:
-        times, signals, y_err, x_err = data
+    # times, signals, [y-errors, x-errors] given
+    for i, d in enumerate(data, 1):
+        yield [d, ()][is_null(d)]
+        # if is_null(d):
+        #     yield ()
+        # else:
+        #     yield d
 
-    else:
-        raise ValueError('Invalid number of arguments: %i' % len(data))
+    for _ in range(i, 4):
+        yield ()
 
+    yield labels
+
+
+def auto_transpose(array, like):
+    time_axis = np.argmax(like.shape)
+    assert time_axis == 1
+
+    array = np.atleast_2d(array)
+    assert array.ndim == 2
+    if np.argmax(array.shape) != 1:
+        return array.T
+    return array
+
+
+def get_data(data, labels):
+    """parse data arguments"""
+
+    times, signals, y_err, x_err, labels = _parse_data(data, labels)
     #
-    if is1d(signals):  # is_uniform(signals):
-        signals = np.atleast_2d(signals)  # this may return masked array
+    if (is_uniform(times) and is_uniform(signals)):
+        # auto transpose
+        times = np.atleast_2d(times)
+        # NOTE: atleast_2d may return masked array
+        signals = auto_transpose(signals, times)
+    elif (len(times) != len(signals)):
+        # ragged signal list, explicit time stamps
+        raise ValueError('Number of time and signal vectors do not correspond. Please provide explicit time stamps for all signal vectors when plotting ragged time series.'
+                         )
 
     # safety breakout for erroneous arguments that can trigger very slow
     # plotting loop
     n = len(signals)
-    if n > N_MAX_TS_SAFETY:
+    if n > N_MAX_TS_PLOT:
         raise TooManyToPlot(
-            'Received %i time series to plot. Refusing since safety limit '
-            'is currently set to %i to avoid accidental compute intensive '
-            'commands from overwhelming system resources.'
-            % (n, N_MAX_TS_SAFETY))
+            'Received %i time series to plot. This is probably not what you '
+            'wanted. Refusing since safety limit is currently set to %i to '
+            'avoid accidental compute intensive commands from overwhelming '
+            'system resources.' % (n, N_MAX_TS_PLOT))
 
-    # get independent variable (time) vectors
-    times_ = []
-    if is_null(times):
-        times = (None,)
-    elif is1d(times):
-        times = np.atleast_2d(times)
+    t0 = times if is1d(times) else times[0]
+    yield check_data('time', times, signals, t0)
+    yield signals
+    yield check_data('y_err', y_err, signals)
+    yield check_data('x_err', x_err, signals)
+    # for name, array in dict(y_err=y_err, x_err=x_err).items():
+    # yield check_data(name, array, signals)
+    yield get_labels(labels, signals)
 
-    if n < len(times):
-        raise ValueError('Superfluous time vector(s).')
 
-    # duplicate times if multivariate implied (without duplicating memory!!)
-    for t, x in itt.zip_longest(times, signals, fillvalue=times[0]):
-        m = len(x)
-        if is_null(t):
-            # plot by frame index if no time
-            t = np.arange(m)
-        elif len(t) != m:
-            raise ValueError('Unequal number of points between data and time '
-                             'arrays.')
-        elif relative_time:
-            # Adjust start time
-            t = t - t[0]
-        #
-        times_.append(t)
+def check_data(name, array, signals, fill=None):
+    # for name, vector in kws.items():
+    if is_null(array):
+        yield None
+        return
 
-    return times_, signals, y_err, x_err
+    if is_uniform(signals) and is_uniform(array):
+        array = auto_transpose(array, signals)
+
+    n = len(signals)
+    if n < len(array):
+        raise ValueError(
+            f'Superfluous {name} vector(s). Received {len(array)}, expected {n}')
+
+    for vector, signal in itt.zip_longest(array, signals, fillvalue=fill):
+        n = len(signal)
+        if not is_null(vector) and (len(vector) != n):
+            raise ValueError(f'Unequal number of points between signal '
+                             f'({n}) and {name} vectors ({len(vector)}).')
+        yield vector
 
 
 def sanitize_data(t, signal, y_err, x_err):
@@ -266,23 +313,12 @@ def sanitize_data(t, signal, y_err, x_err):
     -------
 
     """
-    n = len(signal)
-    stddevs = [None, None]
-    for i, (yx, std) in enumerate(zip('yx', (y_err, x_err))):
-        if is_null(std):
-            continue
-
-        size = len(std)
-        if size != n:
-            raise ValueError(f'Unequal number of points between data '
-                             f'({n}) and {yx}-stddev arrays ({size}).')
-
-        # aggregate
-        stddevs[i] = std
 
     # mask nans
     signal = np.ma.MaskedArray(signal, ~np.isfinite(signal))
-    return (t, signal) + tuple(stddevs)
+    if is_null(t):
+        t = np.arange(len(signal))
+    return (t, signal, y_err, x_err)
 
 
 # def sanitize_data(t, signal, y_err, x_err, show_errors, relative_time):
@@ -361,8 +397,8 @@ def get_line_colours(n, colours, cmap):
         colours = cm(np.linspace(0, 1, n))  # linear colour map for ts
 
     elif (colours is not None) and (len(colours) < n):
-        logger.warning('Colour sequence has too few colours (%i < %i). Colours '
-                       'will repeat' % (len(colours), n))
+        wrn.warn('Colour sequence has too few colours (%i < %i). Colours '
+                 'will repeat' % (len(colours), n))
     return colours
 
 
@@ -383,16 +419,14 @@ def get_line_colours(n, colours, cmap):
 
 def get_axes_labels(axes_labels):
     if (axes_labels is None) or (len(axes_labels) == 0):
-        return defaults.axes_labels
+        return DEFAULTS.axes_labels
 
-    if len(axes_labels) == 2:
-        xlabels, ylabel = axes_labels
-
-        if isinstance(xlabels, str):
-            xlabels = (xlabels, '')
-    else:
+    if len(axes_labels) != 2:
         raise ValueError('Invalid axes labels')
 
+    xlabels, ylabel = axes_labels
+    if isinstance(xlabels, str):
+        xlabels = (xlabels, '')
     return xlabels, ylabel
 
 
@@ -407,46 +441,200 @@ def uncertainty_contours(ax, t, signal, stddev, styles, **kws):
     return ax.plot(t, smoother(signal - sigma * stddev), colour, **kws)
 
 
-class TooManyToPlot(Exception):
-    pass
+def get_axes(ax, figsize=None, twinx=None, **kws):
+
+    if ax is not None:
+        return ax.figure, ax
+
+    # get axes with parasite (sic)
+    if twinx is not None:
+        axes_cls = TWIN_AXES_CLASSES.get(twinx)
+        if axes_cls:
+            # make twin
+            fig = plt.figure(figsize=figsize)
+            ax = axes_cls(fig, 1, 1, 1, **kws)
+            ax.setup_ticks()
+            fig.add_subplot(ax)
+            return fig, ax
+
+        #
+        wrn.warn('Option %r not understood for argument `twinx`. '
+                 'Ignoring.', twinx)
+
+    return plt.subplots(figsize=figsize)
 
 
-# TODO: evolve to multiprocessed TS plotter.
+def setup_figure(ax, show_hist):
+    """Setup figure geometry"""
 
-# TODO: Keyword translation?
+    # FIXME:  leave space on the right of figure to display offsets
+    fig, ax = get_axes(ax)
 
-@attrs
-class TimeSeriesPlot(object):
-    kws = attr({})
-    styles = attr({})
+    # Add subplot for histogram
+    hax = None
+    if show_hist:
+        divider = make_axes_locatable(ax)
+        hax = divider.append_axes('right', size='25%', pad=0.,
+                                  sharey=ax)
+        hax.grid()
+        hax.yaxis.tick_right()
 
-    fig = attr(None)
-    ax = attr(None)
-    art = attr([])
+    # # NOTE: #mpl >1.4 only
+    # if colours is not None:
+    #     ccyc = cycler('color', colours)
+    #     ax.set_prop_cycle(ccyc)
+    #     if show_hist:
+    #         hax.set_prop_cycle(ccyc)
 
-    hist = attr([])
-    hax = attr(None)
+    ax.grid(b=True)  # which='both'
+    return fig, ax, hax
 
-    # mask_shown = attr(False, init=False)  # , repr=False
-    _linked = attr([], init=False)
 
-    # _proxies = attr([], init=False)
+class TimeSeriesPlot:
+    """
+    A time series plotting class
+    """
+    # TODO: evolve to multiprocessed TS plotter.
+    # TODO: Keyword translation?
 
-    # axes limits
-    plims = attr((None, None))
-    x_lim = attr(np.array([np.inf, -np.inf]), init=False)
-    y_lim = attr(np.array([np.inf, -np.inf]), init=False)
+    def __init__(self, ax=None, title='', hist=(), plims=DEFAULTS.plims):
 
-    zorder0 = attr(10, init=False, repr=False)
+        self.fig, self.ax, self.hax = setup_figure(ax, hist)
+        self.art = []
+        self.hist = []
+        self._linked = []
+        # _proxies = []
 
-    def plot_ts(self, ax, x, y, y_err, x_err, label, show_errors,
-                show_masked, show_hist, relative_time, styles):
+        # axes limits
+        self.plims = plims
+        self.xlim = np.array([np.inf, -np.inf])
+        self.ylim = np.array([np.inf, -np.inf])
+
+        self.zorder0 = 10
+
+        self.styles = {}
+
+        # default layout for pretty figures
+        # left, bottom, right, top = [0.025, 0.01, 0.97, .98]
+        # fig.tight_layout(rect=rect)
+        # return fig, ax
+
+    def plot(self, *data, masked=False, hist=False, relative_time=False,
+             labels=(), colors=None, cmap=None,
+             draggable=False, offsets=(),
+             **kws):
+        """
+        Plot time series
+
+        Parameters
+        ----------
+        data: tuple of array-likes
+            (signal,)   -   in which case t is implicitly the integers up to
+                            len(signal).
+            (t, signal) -   in which case uncertainty is ignored.
+            (t, signal, uncertainty)
+
+        t: array-like or tuple of array-likes or None, optional
+            Time stamps. If None or empty, the *signal* will be plotted over
+            an index array. If tuple or multi-dimensional array, the array axes
+            are interpreted as for *signal*. If *t* is 1D and signal is 
+            multi-dimensional, the same timesteps will be used for all time 
+            series in signal - ie. multivariate time series.  
+        signal: array-like or dict
+            Time series data values. For multivariate data, first dimension
+            indexes the different variables. ie. For an input array, the shape
+            should be (n, m) where n is the number of time series and m is the
+            number of points.
+        uncertainty : array-like or tuple of array-likes, optional
+            Standard deviation uncertainty associated with signal.
+
+        """
+
+        # FIXME: get this to work with astropy time objects
+        # TODO: docstring
+        # TODO: astropy.units ??
+        # TODO: max points = 1e4 ??
+
+        # Check keyword argument validity
+        kws, styles = check_kws(kws)
+        show_hist = bool(len(kws.get('hist', {})))
+
+        # from IPython import embed
+        # embed(header="Embedded interpreter at 'ts.py':536")
+
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # parse data args: times, signals, y_err, x_err
+        # *data, _labels = get_data(data, labels)
+        # n = len(data[1])  # signals
+
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # colours = get_line_colours(n, colors, cmap)
+
+        # print('before zip:', len(times), len(signals), len(errors))
+        # Do the plotting
+
+        # d = y, t, uy, ux, lbls = get_data(data, labels)
+        # from IPython import embed
+        # embed(header="Embedded interpreter at 'ts.py':568")
+
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # zip_longest in case errors or times are empty sequences
+        for i, (t, y, σy, σt, label) in enumerate(itt.zip_longest(
+                *get_data(data, labels))):
+            # print(np.shape(t), np.shape(y), np.shape(σy), np.shape(σt))
+            # if yo:
+            #     y = y + yo
+            self.errorbar(t, y, σy, σt, label, masked,
+                          show_hist, relative_time, styles)
+
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # add text labels
+        # self.set_labels(title, kws.axes_labels,
+        #                kws.twinx, relative_time)
+
+        # for lim in (self.xlim, self.ylim):
+        #     lim += np.multiply([-1, 1], (np.ptp(lim) * kws.whitespace / 2))
+
+        # set auto-scale limits
+        # print('setting lims: ', self.ylim)
+        for xy in 'xy':
+            lim = getattr(self, f'{xy}lim')
+            if np.isfinite(lim).all():
+                self.ax.set(**{f'{xy}lim': lim})
+
+        # xlim=self.xlim, ylim=self.ylim,
+        # ax.set(xscale=self.kws.xscale, yscale=self.kws.yscale)
+
+        # self.set_axes_limits(data, kws.whitespace, (kws.xscale, kws.yscale),
+        #                     kws.offsets)
+
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Setup plots for canvas interaction
+
+        # FIXME: offsets should work even when not draggable!!
+
+        if draggable and not show_hist:
+            # FIXME: maybe warn if both draggable and show_hist
+            # make the artists draggable
+
+            self.plots = DraggableErrorbar(self.art, offsets=kws.offsets,
+                                           linked=self._linked,
+                                           **styles.legend)
+            # TODO: legend with linked plots!
+
+        else:
+            self.ax.legend(self.art, labels, **styles.legend)
+            # self._make_legend(ax, self.art, labels)
+
+        return self
+
+    def errorbar(self, x, y, y_err, x_err, label,
+                 show_masked, show_hist, relative_time, styles):
 
         # TODO maxpoints = 1e4  opt
 
-        if (y_err is not None) & (show_errors == 'contour'):
-            uncertainty_contours(ax, x, y, y_err, styles, lw=1)
-            # TODO: or simulated_samples?
+        # if (y_err is not None) & (show_errors == 'contour'):
+        #     uncertainty_contours(self.ax, x, y, y_err, styles, lw=1)
 
         # NOTE: masked array behaves badly in mpl < 1.5.
         # see: https://github.com/matplotlib/matplotlib/issues/5016/
@@ -454,50 +642,21 @@ class TimeSeriesPlot(object):
 
         # main plot
         x, y, y_err, x_err = data = sanitize_data(x, y, y_err, x_err)
-        ebar_art = ax.errorbar(*data, label=label, zorder=self.zorder0,
-                               **styles.errorbar)
 
-        self.art.append(ebar_art)
+        ebar = self.ax.errorbar(x, y, y_err, x_err,
+                                label=label, zorder=self.zorder0,
+                                **styles.errorbar)
+        self.art.append(ebar)
 
-        # set axes limits
-        lims = []
-        for xy, p, e in zip((x, y), self.plims, (x_err, y_err)):
-            lims.append(get_percentile_limits(xy, p, e))
+        self.set_limits(x, y, x_err, y_err)
 
-        for lim, xy in zip(lims, 'xy'):
-            l, u = getattr(self, f'{xy}_lim')
-            new_lim = np.array([min(lim[0], l), max(lim[1], u)])
-
-            # check compat with scale
-            scale = self.kws[f'{xy}scale']
-            if scale == 'log':
-                neg = ([x, y][xy == 'y'] <= 0)
-                # if neg.any():
-                #     logger.warning(
-                #             'Requested logarithmic scale, but data contains '
-                #             'negative points. Switching to symmetric log '
-                #             'scale')
-                #     self.kws[f'{xy}scale'] = 'symlog'
-                if new_lim[0] <= 0:  # FIXME: both could be smaller than 0
-                    logger.warning(
-                        'Requested negative limits on log scaled axis. '
-                        'Using smallest positive data element as lower '
-                        'limit instead.')
-                    new_lim[0] = y[~neg].min()
-            # print('new', new_lims)
-            # set new limits
-            setattr(self, f'{xy}_lim', new_lim)
-
-        # print('YLIMS', y_lims)
-        # print('lims', 'x', self.x_lim, 'y', self.y_lim)
+        if relative_time:
+            self.ax.xaxis.major.formatter.set_useOffset(x[0])
+            self.ax.xaxis.set_major_locator(OffsetLocator())
 
         # plot masked values with different style if requested
         if show_masked:
-            col = ebar_art[0].get_color()
-            msk_art = self.plot_masked_points(x, y, col, show_masked)
-            if msk_art:
-                self.art.append(msk_art)
-                self._linked.append((ebar_art, msk_art))
+            self.plot_masked_points(x, y, show_masked)
 
         # Histogram
         if show_hist:
@@ -505,32 +664,35 @@ class TimeSeriesPlot(object):
 
         self.zorder0 = 1
 
-        return ebar_art
+        return ebar
 
-    def plot_masked_points(self, t, signal, colour, how):
+    def plot_masked_points(self, t, signal, marker='x', color=None, **kws):
         # Get / Plot GTIs
-
-        # valid = self._original_sizes[i]
-        unmasked = signal.copy()  # [:valid]
-        # tum = t[:valid]
 
         # msk_art = None
         # if how == 'span':
         #     self.plot_masked_intervals(ax, t, unmasked.mask)
 
-        if how == 'x':
-            # invert mask
-            unmasked.mask = ~unmasked.mask
-            # NOTE: using errorbar here so we can easily convert to
-            #  DraggableErrorbarContainers
-            # FIXME: Can fix this once DraggableLines are supported
-            # TODO: manage opts in styles.....
-            return self.ax.errorbar(t, unmasked, color=colour,
-                                    marker='x', ls='None', alpha=0.7,
-                                    label='_nolegend_')
+        if color is None:
+            last = line, *_ = self.art[-1]
+            color = line.get_color()
 
-        else:
-            raise NotImplementedError
+        # invert mask
+        unmasked = np.array(signal[signal.mask])
+
+        # NOTE: using errorbar here so we can easily convert to
+        #  DraggableErrorbarContainers
+        # FIXME: Can fix this once DraggableLines are supported
+        # TODO: manage opts in styles.....
+        # if how == 'x':
+        ebar = self.ax.errorbar(t[signal.mask], unmasked, color=color,
+                                marker=marker, ls='None', alpha=0.7,
+                                label='_nolegend_')
+        if ebar:
+            self.art.append(ebar)
+            self._linked.append((last, ebar))
+
+        # raise NotImplementedError
 
     def plot_histogram(self, signal, **props):
         #
@@ -540,60 +702,36 @@ class TimeSeriesPlot(object):
 
         self.hax.grid(True)
 
-    def setup_figure(self, ax, colours, show_hist):
-        """Setup figure geometry"""
+    def set_limits(self, x, y, x_err, y_err):
+        # set axes view limits
+        lims = []
+        for xy, p, e in zip((x, y), self.plims, (x_err, y_err)):
+            lims.append(get_percentile_limits(xy, p, e))
 
-        # FIXME:  leave space on the right of figure to display offsets
-        fig, ax = self.get_axes(ax)
+        for lim, xy in zip(lims, 'xy'):
+            l, u = getattr(self, f'{xy}lim')
+            new_lim = np.array([min(lim[0], l), max(lim[1], u)])
 
-        # Add subplot for histogram
-        if show_hist:
-            from mpl_toolkits.axes_grid1 import make_axes_locatable
-            divider = make_axes_locatable(ax)
-            self.hax = divider.append_axes('right', size='25%', pad=0.,
-                                           sharey=ax)
-            self.hax.grid()
-            self.hax.yaxis.tick_right()
-
-        # NOTE: #mpl >1.4 only
-        if colours is not None:
-            from cycler import cycler
-            ccyc = cycler('color', colours)
-            ax.set_prop_cycle(ccyc)
-            if show_hist:
-                self.hax.set_prop_cycle(ccyc)
-
-        ax.grid(b=True)  # which='both'
-        self.fig = fig
-        self.ax = ax
-        return fig, ax
-
-    def get_axes(self, ax, figsize=default_figsize, twinx=None, **kws):
-
-        if ax is not None:
-            return ax.figure, ax
-
-        # get axes with parasite (sic)
-        if twinx is not None:
-            axes_cls = TWIN_AXES_CLASSES.get(twinx)
-            if axes_cls:
-                # make twin
-                fig = plt.figure(figsize=figsize)
-                ax = axes_cls(fig, 1, 1, 1, **kws)
-                ax.setup_ticks()
-                fig.add_subplot(ax)
-                return fig, ax
-
-            #
-            logger.warning('Option %r not understood for argument `twinx`'
-                           'ignoring' % twinx)
-
-        return plt.subplots(figsize=figsize)
-
-        # default layout for pretty figures
-        # left, bottom, right, top = [0.025, 0.01, 0.97, .98]
-        # fig.tight_layout(rect=rect)
-        # return fig, ax
+            # check compat with scale
+            scale = getattr(self.ax, f'get_{xy}scale')()
+            if scale == 'log':
+                neg = ([x, y][xy == 'y'] <= 0)
+                # if neg.any():
+                #     logger.warning(
+                #             'Requested logarithmic scale, but data contains '
+                #             'negative points. Switching to symmetric log '
+                #             'scale')
+                #     self.kws[f'{xy}scale'] = 'symlog'
+                if new_lim[0] <= 0:  # FIXME: both could be smaller than 0
+                    wrn.warn('Requested negative limits on log scaled axis. '
+                             'Using smallest positive data element as lower '
+                             'limit instead.')
+                    new_lim[0] = y[~neg].min()
+            # print('new', new_lims)
+            # set new limits
+            setattr(self, f'{xy}_lim', new_lim)
+            # print('YLIMS', ylims)
+            # print('lims', 'x', self.xlim, 'y', self.ylim)
 
     def set_labels(self, title, axes_labels, twinx, relative_time, t0=''):
         """axis title + labels"""
@@ -618,137 +756,13 @@ class TimeSeriesPlot(object):
                                      ha='right',
                                      transform=ax.xaxis.label.get_transform())
 
+    def loglog(self, *data, **kws):
+        self.ax.set_xscale('log')
+        self.ax.set_yscale('log')
+        return self.plot(*data, **kws)
 
-def plot(*data, **kws):
-    # fixme: better to have explicit kw_only args for better discoverability...
-    """
-    Plot light curve(s)
-
-    Parameters
-    ----------
-    data:   tuple of array-likes
-        (signal,)   -   in which case t is implicitly the integers up to
-                        len(signal)
-        (t, signal) -   in which case uncertainty is ignored
-        (t, signal, uncertainty)
-        Where:
-            t:   (optional; array-like or dict)
-                time sequence of corresponding data
-            signal:   (array-like or dict)
-                time series data values
-            uncertainty :   (optional; array-like or dict)
-                standard deviation uncertainty associated with signal
-
-    """
-
-    # FIXME: get this to work with astropy time objects
-    # TODO: docstring
-    # TODO: astropy.units ??
-    # TODO: max points = 1e4 ??
-
-    # Check keyword argument validity
-    kws, styles = check_kws(kws)
-    bool(len(kws.get('hist', {})))
-    show_hist = kws.pop('show_hist') or bool(len(kws.get('hist', {})))
-
-    #
-    tsp = TimeSeriesPlot(kws, styles)
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # check for structured data (dict keyed on labels and containing data)
-    labels = kws.labels
-    l = [isinstance(d, dict) for d in data]
-    if any(l):
-        dgen = (list(d.values()) if ll else d for d, ll in zip(data, l))
-        keys = [tuple(data[i].keys()) for i in np.where(l)[0]]
-        data = tuple(dgen)
-        if len(keys) > 1:
-            assert keys[0] == keys[1], "dict keys don't match"
-        if labels is None:
-            labels = keys[0]
-
-    # parse data args: times, signals, y_err, x_err
-    data = get_data(data, kws.relative_time)
-    n = len(data[1])  # signals
-
-    # print(list(map(np.shape, (times, signals, y_err, x_err))))
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # # check labels
-    if labels is None:
-        labels = []
-    elif isinstance(labels, str):
-        labels = [labels]  # check if single label given
-    elif len(labels) > n:
-        raise ValueError('Bad labels')
-
-    # tuple, dict, array...
-
-    colours = get_line_colours(n, kws.colours, kws.cmap)
-    fig, ax = tsp.setup_figure(kws.ax, colours, show_hist)
-
-    # todo ; move to init
-    tsp.plims = kws.plims
-
-    # print('before zip:', len(times), len(signals), len(errors))
-    # Do the plotting
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # zip_longest in case errors or times are empty sequences
-    for i, (x, y, σy, σx, label, yo) in enumerate(itt.zip_longest(
-            *data, labels, kws.offsets)):
-        # print(np.shape(x), np.shape(y), np.shape(y_err), np.shape(x_err))
-        # if yo:
-        #     y = y + yo
-        tsp.plot_ts(ax, x, y, σy, σx, label, kws.show_errors,
-                    kws.show_masked, show_hist, kws.relative_time, styles)
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # add text labels
-    tsp.set_labels(kws.title, kws.axes_labels,
-                   kws.twinx, kws.relative_time)
-
-    # for lim in (tsp.x_lim, tsp.y_lim):
-    #     lim += np.multiply([-1, 1], (np.ptp(lim) * kws.whitespace / 2))
-
-    # set auto-scale limits
-    # print('setting lims: ', tsp.y_lim)
-
-    if np.isfinite(tsp.x_lim).all():
-        ax.set_xlim(tsp.x_lim)
-    if np.isfinite(tsp.y_lim).all():
-        ax.set_ylim(tsp.y_lim)
-
-    # xlim=tsp.x_lim, ylim=tsp.y_lim,
-    ax.set(xscale=tsp.kws.xscale, yscale=tsp.kws.yscale)
-
-    # tsp.set_axes_limits(data, kws.whitespace, (kws.xscale, kws.yscale),
-    #                     kws.offsets)
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # Setup plots for canvas interaction
-
-    # FIXME: offsets should work even when not draggable!!
-
-    if kws.draggable and not show_hist:
-        # FIXME: maybe warn if both draggable and show_hist
-        # make the artists draggable
-        from scrawl.draggable import DraggableErrorbar
-        tsp.plots = DraggableErrorbar(tsp.art, offsets=kws.offsets,
-                                      linked=tsp._linked,
-                                      **tsp.styles.legend)
-        # TODO: legend with linked plots!
-
-    else:
-        ax.legend(tsp.art, labels, **styles.legend)
-        # self._make_legend(ax, tsp.art, labels)
-
-    return tsp
-
-
-def loglog(*data, **kws):
-    kws.setdefault('xscale', 'log')
-    kws.setdefault('yscale', 'log')
-    return plot(*data, **kws)
+    # def animate():
+        # simulated_samples from normal distribution given uncertainties
 
 
 def convert_mask_to_intervals(a, mask=None):
