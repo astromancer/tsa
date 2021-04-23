@@ -32,7 +32,6 @@ PADDING = ('constant', 'mean', 'median', 'minimum', 'maximum', 'reflect',
            'symmetric', 'wrap', 'linear_ramp', 'edge')
 
 
-
 # TODO: subclass for LS TFR
 #   methods for non-uniform window length??
 #   functions for plotting segments etc...
@@ -44,8 +43,31 @@ def periodogram(signal, dt=None, norm=None):
     Compute FFT power (aka periodogram). optionally normalize and or detrend
     """
     # since we are dealing with real signals, spectrum is symmetric
-    normalize = Normalizer(norm, dt)
-    return normalize(FFTpower(signal), signal)
+    normalizer = Normalizer(norm, dt)
+    return normalizer(FFTpower(signal), signal)
+
+
+def pds(signal, dt=None):
+    """
+    Power density spectrum
+
+    Parameters
+    ----------
+    signal : [type]
+        [description]
+    dt : [type], optional
+        [description], by default None
+
+    Examples
+    --------
+    >>> 
+
+    Returns
+    -------
+    [type]
+        [description]
+    """
+    return periodogram(signal, dt, 'pds')
 
 
 def FFTpower(y):
@@ -103,6 +125,28 @@ def resolve_nwindow(nwindow, split, n, dt):
         return _from_unit_string(nwindow, dt)
 
     return int(nwindow)
+
+
+def show_all_windows(cmap='gist_rainbow'):
+    """
+    plot all the spectral windows defined in scipy.signal (at least those that
+    don't want a parameter argument.)
+    """
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    cm = plt.get_cmap(cmap)
+    windows = scipy.signal.windows.__all__
+    ax.set_color_cycle(cm(np.linspace(0, 1, len(windows))))
+
+    winge = ftl.partial(scipy.signal.get_window, Nx=1024)
+    for w in windows:
+        try:
+            plt.plot(winge(w), label=w)
+        except:
+            pass
+    plt.legend()
+    plt.show()
 
 
 def convert_size(nwindow, size, dt, name):
@@ -296,14 +340,14 @@ class Normalizer:
         total_counts = np.c_[segments.sum(-1)]
 
         # FIXME: are you including the power of the window function?????
-        
+
         if self.name == 'leahy':
             return np.squeeze((2 / total_counts) * power)
 
         # total time per segment
         T = nwindow * self.dt  # frequency step is 1/T
 
-        if self.name  == 'pds':
+        if self.name == 'pds':
             return np.squeeze(T * power)
 
         if self.name == 'leahy density':
@@ -315,7 +359,7 @@ class Normalizer:
         raise ValueError
 
     def get_power_unit(self, signal_unit='ADU'):
-        return self.POWER_UNITS[self.name].format(signal_unit or '')
+        return self.POWER_UNITS.get(self.name, '{}').format(signal_unit or '')
 
 
 # def check(self, t, signal, **kws):
@@ -345,8 +389,7 @@ class FFTBase:
         self.df = 1 / self.T
 
         # normalization
-        self.normalize = Normalizer(normalize, dt, signal_unit=unit)
-        
+        self.normalizer = Normalizer(normalize, dt, signal_unit=unit)
 
     @staticmethod
     def _check_input(signal, t, dt, fs, strict=True):
@@ -395,14 +438,22 @@ class FFTBase:
                 dt = 1. / fs
 
         return dt, np.array(signal)
-        
 
     @property
     def omega(self):
         # angular frequencies
         return 2. * np.pi * self.frq
-    
-    
+
+    def get_ylabel(self, signal_unit='ADU'):
+        norm = self.normalizer
+        name = norm.name
+        power_unit = norm.get_power_unit(signal_unit)
+        density = name and (('density' in name) or (name == 'pds'))
+        density = 'density ' * density
+        return f'Power {density}({power_unit})'
+
+    def get_xlabel(self):
+        return 'Frequency (Hz)'
 
 
 class Periodogram(FFTBase):
@@ -463,7 +514,7 @@ class Periodogram(FFTBase):
         signal = self.prepare_signal(signal, detrend, pad, window)
 
         # calculate periodograms
-        return self.normalize(FFTpower(signal), signal)
+        return self.normalizer(FFTpower(signal), signal)
 
     def plot(self, ax=None, signal_unit=None, dc=False, **kws):
         if ax is None:
@@ -474,7 +525,7 @@ class Periodogram(FFTBase):
         i = int(not dc)
         line, = ax.plot(self.frq[i:], self.power[i:], **kws)
 
-        power_unit = self.normalize.get_power_unit(signal_unit)
+        power_unit = self.normalizer.get_power_unit(signal_unit)
         ax.set(xlabel='Frequency (Hz)', ylabel=f'Power ({power_unit})')
         ax.grid()
         fig.tight_layout()
@@ -587,11 +638,11 @@ class Spectrogram(Periodogram):
         n = len(self.signal)
         self.nwindow = nwindow = resolve_nwindow(nwindow, split, n, dt)
         self.noverlap = noverlap = resolve_overlap(nwindow, noverlap, dt)
-        self.padding = self.npadded, * \
-            _ = resolve_padding(pad, nwindow, self.dt)
+        self.padding = self.npadded, *_ = \
+            resolve_padding(pad, nwindow, self.dt)
 
         # fold
-        self.t_seg, segments = get_segments(self.signal, dt, nwindow, noverlap)
+        self.t_seg, segments = get_segments(self.signal, self.dt, nwindow, noverlap)
 
         # calculate periodograms
         self.power = self.compute(segments, detrend, pad, window)
@@ -615,7 +666,7 @@ class Spectrogram(Periodogram):
     def fRayleigh(self):
         return 1. / (self.nwindow * self.dt)
 
-    @property
+    @ftl.cached_property
     def tmid(self):
         # median time for each section
         d, r = divmod(self.nwindow, 2)
@@ -624,25 +675,3 @@ class Spectrogram(Periodogram):
             return np.mean(self.t_seg[:, [d, d + 1]], 0)
 
         return self.t_seg[:, d]
-
-
-def show_all_windows(cmap='gist_rainbow'):
-    """
-    plot all the spectral windows defined in scipy.signal (at least those that
-    don't want a parameter argument.)
-    """
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots()
-    cm = plt.get_cmap(cmap)
-    windows = scipy.signal.windows.__all__
-    ax.set_color_cycle(cm(np.linspace(0, 1, len(windows))))
-
-    winge = ftl.partial(scipy.signal.get_window, Nx=1024)
-    for w in windows:
-        try:
-            plt.plot(winge(w), label=w)
-        except:
-            pass
-    plt.legend()
-    plt.show()
