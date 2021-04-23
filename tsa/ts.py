@@ -1,8 +1,14 @@
+"""
+Time series objects
+"""
+
 import numbers
 import operator
 
 import numpy as np
+# import matplotlib.pyplot as plt
 
+import scrawl
 
 # import uncertainties.unumpy as unp  # linear uncertainty propagation
 # since this library is tracking correlations between rvs operations like mean
@@ -17,53 +23,76 @@ import numpy as np
 # for now calculations on uncertainty has to be done manually which is a pain..
 
 
-class TimeSeries(object):
+class TimeSeries:
     """
-    A basic univariate time series with uncertainties
+    A basic univariate time series with optional uncertainties
     """
+    # This class ties together the functionality of various libraries for
+    # analysing time series data.
+
+    # Features
+    # --------
+    #  * automatic (linearized) uncertainty propagation (assumes normally
+    #    distributed data)
+    #  *
+    #  * TODO:
+    #   interface with
+    #    -statmodels
+    #   - pandas
+    #   - pacal
+    #   - uncertainties
+    #     ~ Approximate (linear) uncertainty propagation. Will only yield
+    #       accurate results when used in computation if uncertainties are small
+    #       compared to variation of the (non-linear) function through which it is
+    #       mapped.
+
+    #       note:
+    #       "Error estimates for non-linear functions are biased on account of
+    #       using a truncated series expansion. The extent of this bias depends
+    #       on the nature of the function. For example, the bias on the error
+    #       calculated for log(1+x) increases as x increases, since the expansion
+    #       to x is a good approximation only when x is near zero."
+    #       from: https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Caveats_and_warnings
+
+    #  * spectral estimation techniques
+    #  * sampled time series + visualizations.
+
+    #  Not supported
+    #  - units.  Make sure you use compatible units when doing arithmetic
 
     @staticmethod
-    def _parse_init_args(*args, **kws):
-        # all parameters passed as keyword args
-        if len(args) == 0:
-            t, x, u = map(kws.get, 'txu')
+    def _parse_init_args(t_or_x, x=None, u=None, **kws):
         # signals only
-        elif len(args) == 1:
-            # Assume here each row gives individual signal for a TS
-            x, = args
-            t = kws.get('t')
-            u = kws.get('u')
-        # times & signals given
-        elif len(args) == 2:  # No errors given
-            t, x = args
-            u = kws.get('u')
-        # times, signals, errors given
-        elif len(args) == 3:
-            t, x, u = args
-        # bad params
-        else:
-            raise ValueError('Incorrect number of arguments: %i' % len(args))
-
-        # check data
         if x is None:
-            raise ValueError('Data should be a numerical sequence')
-            # otherwise a object array containing `None` results below
+            x = t_or_x
+            if isinstance(x, TimeSeries):
+                return x.t, x.x, x.u
 
-        return t, x, u
+            return None, x, u
+
+        # times & signals given
+        return t_or_x, x, u
+
+    # def __new__(cls, *args, **kws):
+    #     t, x, u = cls._parse_init_args(*args, **kws)
+    #     obj = super().__new__()
+    #     return TimeSeries.__init__(obj, t, x, u, **kws)
 
     def __init__(self, *args, **kws):
+        """
+        Create a TimeSeries object
 
+        Examples
+        --------
+        >>> TimeSeries(np.random.randn(100))
+
+        """
         t, x, u = self._parse_init_args(*args, **kws)
-
-        # make sure we have 1d array
-        x = np.ma.asarray(x).squeeze()
-        if x.ndim != 1:
-            raise ValueError('Time Series data should be 1D')
 
         # times
         self._t = self._x = self._u = None
-        self.t = t
         self.x = x
+        self.t = t  # must be after set_x
         self.u = u
 
         # if u is None:
@@ -79,18 +108,17 @@ class TimeSeries(object):
 
     @t.setter
     def t(self, t):
-        # if t is None:
-        #     t = np.arange(len(x))
-        #     # todo maybe better to keep None and handle special case at
-        #     # function level
-        # else:
-        if t is not None:
-            t = np.asanyarray(t).squeeze()
-            n = len(self.x)
-            if len(t) != n:
-                raise ValueError(
-                        f'Unequal number of points between data (n={n}) and '
-                        f'time (n={len(t)}) arrays.')
+        if t is None:
+            self._t = None  # t = np.arange(len(x))
+            return
+
+        t = np.asanyarray(t).squeeze()
+        n = self.n
+        if len(t) != n:
+            raise ValueError(
+                f'Unequal number of points between data ({n=}) and time '
+                f'(n={len(t)}) arrays.'
+            )
 
         self._t = t
 
@@ -100,7 +128,13 @@ class TimeSeries(object):
 
     @x.setter
     def x(self, x):
+        # make sure we have masked array
         self._x = np.ma.array(x)
+        # .squeeze()
+        # if x.ndim != 1:
+        #     raise ValueError(f'Time Series data should be 1D, not {x.ndim}')
+
+        # self._x = np.ma.array(x)
 
     @property
     def u(self):
@@ -108,7 +142,9 @@ class TimeSeries(object):
 
     @u.setter
     def u(self, u):
-        self._u = np.ma.array(u)
+        if u is not None:
+            u = np.ma.array(u)
+        self._u = u
 
     @property
     def n(self):
@@ -116,15 +152,6 @@ class TimeSeries(object):
         return len(self)
 
     # def fold(self, eph):
-
-
-    def plot(self, ax=None, *args, **kws):
-        import matplotlib.pyplot as plt
-
-        if ax is None:
-            fig, ax = plt.subplots()
-
-        return ax.errorbar(self.t, self.x, self.u)
 
     # @property
     # def data(self):
@@ -146,16 +173,17 @@ class TimeSeries(object):
 
     def __iter__(self):
         """allow unpacking: `t, y, u = ts`"""
-        return self.t, self.x, self.u
+        yield from (self.t, self.x, self.u)
 
     def __pos__(self):
         return self
 
     def __neg__(self):
-        return self.__class__(self.t, -self._x)
+        # pylint: disable=invalid-unary-operand-type
+        return self.__class__(self.t, -self.x)
 
     def __abs__(self):
-        return self.__class__(self.t, abs(self._x))
+        return self.__class__(self.t, abs(self.x))
 
     # arithmetic
     # --------------------------------------------------------------------------
@@ -164,16 +192,17 @@ class TimeSeries(object):
         if isinstance(other, TimeSeries):
             # Can only really do time series if they are simultaneous
             if self.n != other.n:
-                raise ValueError('Arithmetic on %s objects with different '
-                                 'sizes not permitted' % self.__class__)
+                raise ValueError(f'Arithmetic on {self.__class__} objects with'
+                                 f' different sizes not permitted')
 
             # TODO: propagate uncertainties!
-            return self.__class__(self.t, op(self._x, other._x))
+            return self.__class__(self.t, op(self.x, other.x))
 
         # arithmetic with complex numbers not supported
         if isinstance(other, numbers.Complex) and \
                 not isinstance(other, numbers.Real):
-            raise TypeError('Arithmetic with complex numbers not supported')
+            raise TypeError('Arithmetic with complex numbers not currently '
+                            'supported.')
             # all other number types should be OK
 
         # array-like (any object that can create an array / any duck-type array)
@@ -196,132 +225,6 @@ class TimeSeries(object):
     __rsub__ = __sub__
     __rmul__ = __mul__
     __rtruediv__ = __truediv__
-
-
-
-
-class TimeSeriesDev:
-    """
-    A basic time series object.
-
-    This class ties together the functionality of various libraries for
-    analysing time series data.
-
-    Features
-    --------
-     * automatic (linearized) uncertainty propagation (assumes normally
-       distributed data)
-     *
-     * TODO:
-      interface with
-       -statmodels
-      - pandas
-      - pacal
-      - uncertainties
-        ~ Approximate (linear) uncertainty propagation. Will only yield
-          accurate results when used in computation if uncertainties are small
-          compared to variation of the (non-linear) function through which it is
-          mapped.
-
-          note:
-          "Error estimates for non-linear functions are biased on account of
-          using a truncated series expansion. The extent of this bias depends
-          on the nature of the function. For example, the bias on the error
-          calculated for log(1+x) increases as x increases, since the expansion
-          to x is a good approximation only when x is near zero."
-          from: https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Caveats_and_warnings
-
-
-     * support for multivariate (simultaneous) data
-     * spectral estimation techniques
-     * sampled time series + visualizations.
-
-     Not supported
-     - units.  Make sure you use compatible units when doing arithmetic
-
-    """
-
-    # _allow_empty = False
-    _handle_uncertainties = 0
-
-    def __init__(self, *args, **kws):
-
-        # handle uncertainties
-        # Options: Linearized uncertainty propagation via `uncertainties`
-        #        : Full distribution calculation with rv arithmetic via `pacal`
-        # if _handle_uncertainties == 0:
-
-        # null time series
-        # if len(args) == 0:
-        #     '' # is this useful??
-
-        # signals only
-        if len(args) == 1:
-            # Assume here each row gives individual signal for a TS
-            self.x = np.ma.asarray(args[0])
-            self.t = kws.get('t')
-            self.u = kws.get('u')
-
-        # times & signals given
-        elif len(args) == 2:  # No errors given
-            t, data = args
-            assert len(t) == len(data)
-            self.t = np.asanyarray(t)
-            self.x = np.ma.asarray(data)
-            self.u = kws.get('u')
-
-        # times, signals, errors given
-        elif len(args) == 3:
-            t, data, u = args
-            self.t = np.asanyarray(t)
-            self.x = np.ma.asarray(data)
-            self.u = u
-
-    # todo: check if `t` equi-spaced
-
-    # def __repr__(self):
-    # nice repr with pm etc
-
-    def __len__(self):
-        return len(self.x)
-
-    def __pos__(self):
-        return self
-
-    def __neg__(self):
-        return self.__class__(self.t, -self.x, self.u)
-
-    def __abs__(self):
-        return self.__class__(self.t, abs(self.x), self.u)
-
-    # arithmetic
-    # --------------------------------------------------------------------------
-    def __add__(self, other):
-        #
-        if isinstance(other, numbers.Real):
-            # real numeric type
-            return self.__class__(self.t, self.x + other, self.u)
-
-        if isinstance(other, TimeSeries):
-            # Can only add time series if they are simultaneous
-            if not all(self.t == other.t):
-                raise ValueError('Cannot add %s with different time stamps' %
-                                 self.__class__)
-
-            return self.__class__(
-                    self.t,
-                    # add data
-                    self.x + other.x,
-                    # add stddev uncertainty in quadrature
-                    np.sqrt(np.square(self.u) + np.square(other.u))
-            )
-
-        # array-like (any object that can create an array / any duck-type array)
-        other = np.asanyarray(other)
-        return self.__class__(self.t, self.x + other, self.u)
-
-    def __sub__(self, o):
-        return self + -o
 
     # element-wise comparison
     # object.__lt__(self, other)
@@ -383,18 +286,14 @@ class TimeSeriesDev:
     # object.__floor__(self)
     # object.__ceil__(self)
 
-    # def plot(self):
-    #     ''
+    def plot(self, *args, **kws):
+        tsp = scrawl.ts.TimeSeriesPlot()
+        # u = self.u if self.u is None else self.u.T
+        return tsp.plot(*self, *args, **kws)
 
 
-class MultiVariateTimeSeries:
-    pass
+# class MultiVariateTimeSeries(TimeSeries):
+#     # support for simultaneous multivariate data
 
-
-if __name__ == '__main__':
-    # tests
-    z = np.random.randn(10)
-    ts = TimeSeries(z)
-
-    ts + ts
-    42 * ts
+#     # def decorrelate()
+#     pass
