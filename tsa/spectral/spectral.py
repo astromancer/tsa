@@ -16,10 +16,11 @@ import numpy as np
 import scipy
 from recipes.string import Percentage
 
-from . import windowing, fold, detrending
-from .gaps import fill_gaps, get_delta_t_mode, timing_summary  # , windowed
+from .. import windowing, detrending
+from ..gaps import fill_gaps, get_delta_t_mode, timing_summary  # , windowed
 
 from recipes.logging import logging, get_module_logger
+
 
 # module level logger
 logger = get_module_logger()
@@ -127,28 +128,6 @@ def resolve_nwindow(nwindow, split, n, dt):
     return int(nwindow)
 
 
-def show_all_windows(cmap='gist_rainbow'):
-    """
-    plot all the spectral windows defined in scipy.signal (at least those that
-    don't want a parameter argument.)
-    """
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots()
-    cm = plt.get_cmap(cmap)
-    windows = scipy.signal.windows.__all__
-    ax.set_color_cycle(cm(np.linspace(0, 1, len(windows))))
-
-    winge = ftl.partial(scipy.signal.get_window, Nx=1024)
-    for w in windows:
-        try:
-            plt.plot(winge(w), label=w)
-        except:
-            pass
-    plt.legend()
-    plt.show()
-
-
 def convert_size(nwindow, size, dt, name):
     if not bool(size):
         return 0
@@ -175,7 +154,7 @@ def _from_unit_string(size, dt):
     raise NotImplementedError
 
 
-def resolve_overlap(nwindow, noverlap, dt):
+def resolve_overlap(nwindow, noverlap, dt=None):
     """
     Convert semantic `noverlap` to integer value.
 
@@ -379,7 +358,8 @@ class Normalizer:
 
 
 class FFTBase:
-    def __init__(self, *args, dt=1, fs=None, normalize=None, unit='ADU', strict=True):
+    def __init__(self, *args, dt=1, fs=None, normalize=None, unit='ADU',
+                 strict=True):
         *t, signal = args
         dt, signal = self._check_input(signal, t, dt, fs, strict)
 
@@ -393,7 +373,7 @@ class FFTBase:
 
     @staticmethod
     def _check_input(signal, t, dt, fs, strict=True):
-        
+
         emit = raises(ValueError) if strict else wrn.warn
         if np.ma.is_masked(signal):
             emit(
@@ -402,8 +382,7 @@ class FFTBase:
                 'may wish to first interpolate the missing points, although it '
                 'is probably best to use an analysis technique, such as such as '
                 'the Lomb-Scargle periodogram, which is valid '
-                'for non-constant time steps.'
-            )
+                'for non-constant time steps.')
 
         # check timing
         if len(t) > 0:
@@ -416,8 +395,7 @@ class FFTBase:
             if msg:
                 emit(
                     f'Your timestamp array contains {msg}. The FFT-based methods is not '
-                    'applicable for time series with non-constant time steps.'
-                )
+                    'applicable for time series with non-constant time steps.')
         else:
             # no timestamps
             if fs and dt:
@@ -492,7 +470,8 @@ class Periodogram(FFTBase):
     def prepare_signal(self, signal, detrend, pad, window):
 
         # detrend
-        signal = detrending.detrend(signal, detrend)
+        method, n, kws = detrending.resolve_detrend(detrend)
+        signal = detrending.detrend(signal, method, n, **kws)
 
         # padding
         if pad:
@@ -582,7 +561,7 @@ class Spectrogram(Periodogram):
                  split=None,
                  dt=1,
                  fs=None,
-                 normalize='rms', 
+                 normalize='rms',
                  strict=True):
         """
         Compute the spectrogram of a time series. Optional arguments 
@@ -632,7 +611,8 @@ class Spectrogram(Periodogram):
 
         # super().__init__(*args, window, detrend, pad, dt, fs, normalize)
 
-        FFTBase.__init__(self, *args, dt=dt, fs=fs, normalize=normalize, strict=strict)
+        FFTBase.__init__(self, *args, dt=dt, fs=fs,
+                         normalize=normalize, strict=strict)
 
         # t, signal = prepare_signal(signal, t, self.dt, gaps)
         n = len(self.signal)
@@ -642,7 +622,8 @@ class Spectrogram(Periodogram):
             resolve_padding(pad, nwindow, self.dt)
 
         # fold
-        self.t_seg, segments = get_segments(self.signal, self.dt, nwindow, noverlap)
+        self.t_seg, segments = get_segments(
+            self.signal, self.dt, nwindow, noverlap)
 
         # calculate periodograms
         self.power = self.compute(segments, detrend, pad, window)

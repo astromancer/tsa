@@ -12,11 +12,11 @@ from matplotlib import ticker
 # from misc.meta import
 # from superplot.spectra import formatter_factory
 
-from graphing.utils import get_percentile_limits
-from graphing.connect import ConnectionMixin, mpl_connect
-from graphing.formatters import ReciprocalFormatter
+from scrawl.utils import get_percentile_limits
+from scrawl.connect import ConnectionMixin, mpl_connect
+from scrawl.ticks import ReciprocalFormatter
 
-from .spectral import Spectral, resolve_nwindow, resolve_overlap
+from .spectral import Spectrogram, resolve_nwindow, resolve_overlap
 from .smoothing import smoother
 
 import more_itertools as mit
@@ -63,13 +63,14 @@ def format_coord_spec(x, y):
 # return minlogfmt(x, 2, '\cdot')
 
 # ****************************************************************************************************
-class TimeFrequencyMapBase(Spectral):
+class TimeFrequencyMapBase(Spectrogram):
+    # FIXME: should not be a Spectrogram subclass
     """base class"""
     color_cycle = 'c', 'b', 'm', 'g', 'y', 'orange'
     lc_props = dict(color='g', marker='o', ms=1.5, mec='None')
     spec_props = dict(color='g')
     cb_props = {}  # dict(format=ticker.FuncFormatter(logformat))
-    defaults = Spectral.defaults
+    # defaults = Spectrogram.defaults
 
     def __init__(self, t, signal, **kws):
         """ """
@@ -87,7 +88,7 @@ class TimeFrequencyMapBase(Spectral):
         show_info = kws.pop('show_info', True)
 
         # Compute spectral estimates
-        Spectral.__init__(self, t, signal, **kws)
+        Spectrogram.__init__(self, t, signal, **kws)
 
         self.figure, axes = self.setup_figure(show_lc, show_spec, show_info)
         self.ax_map, self.ax_lc, self.ax_spec, self.ax_cb = axes
@@ -137,7 +138,6 @@ class TimeFrequencyMapBase(Spectral):
                                          bottom=False, labelbottom=False)
                 for _, spine in self.ax_info.spines.items():
                     spine.set_visible(False)
-
 
         elif show_spec and not show_lc:
             w1, _ = 80, 20
@@ -205,10 +205,7 @@ class TimeFrequencyMapBase(Spectral):
             ax_lc.grid()
 
         # Get label for power values
-        if self.opts.normalise == 'rms':
-            cb_lbl = r'Power density (rms$^2$/Hz)'
-        else:
-            cb_lbl = 'Power'  # FIXME: unit??
+        cb_lbl = self.get_ylabel()
 
         if ax_spec:
             # set yticks invisible on frequency spectum plot
@@ -245,7 +242,7 @@ class TimeFrequencyMapBase(Spectral):
     def plot(self, axes, t, signal, cmap, lc_props={}, spec_props={}):
         """ """
         ax_map, ax_lc, ax_spec, ax_cb = axes
-        tms, frq, P = self.tms, self.frq, self.power
+        frq, P = self.frq, self.power
         # P /= P.mean(1)[:, None]
         valid = frq > self.fRayleigh
         # NOTE: we intentionally do not mask values below fRayleigh, even though
@@ -255,7 +252,7 @@ class TimeFrequencyMapBase(Spectral):
 
         # Plot TFR image
         tlims = self.t_seg[[0, -1], [0, -1]]
-        flims = self.frq[[0, -1]]
+        flims = frq[[0, -1]]
         extent = np.r_[tlims, flims]
         self.im = im = mimage.NonUniformImage(ax_map,
                                               origin='lower',
@@ -269,14 +266,14 @@ class TimeFrequencyMapBase(Spectral):
         # narrow_gap_inds = narrow_gap_inds
         ##print( narrow_gap_inds )
 
-        ##fade gaps
+        # fade gaps
         # alpha = data[...,-1]
         # alpha[:,narrow_gap_inds] = 0.25
         # alpha[:,narrow_gap_inds+1] = 0.25
 
         # print( t.shape, frq.shape, data.shape )
         # embed()
-        im.set_data(tms, frq, P.T)
+        im.set_data(self.tmid, frq, P.T)
         ax_map.images.append(im)
         # ax_map.set_xlim( t[0],t[-1] )
         # ax_map.set_ylim( frq[0],frq[-1] )
@@ -287,7 +284,7 @@ class TimeFrequencyMapBase(Spectral):
 
         if ax_lc:
             # Plot light curve
-            ax_lc.plot(t, signal, **lc_props)  # TODO: Uncertainties
+            self.lc, = ax_lc.plot(t, signal, **lc_props)  # TODO: Uncertainties
             ax_lc.set_xlim(t[0], t[-1])
             ax_lc.set_ylim(*get_percentile_limits(signal, (0, 101)))
 
@@ -306,8 +303,9 @@ class TimeFrequencyMapBase(Spectral):
             sm = 5
             ax_spec.plot(smoother(Pm, sm), frq, **spec_props)
 
-            ax_spec.plot(smoother(Pm_lci, sm), frq, ':', smoother(Pm_uci, sm),
-                         frq, ':', **spec_props)
+            ax_spec.plot(smoother(Pm_lci, sm), frq, ':',
+                         smoother(Pm_uci, sm), frq, ':',
+                         **spec_props)
             # HACK
             # ax_spec.plot(smoother(self.pwr_p75, 5), frq, '-', **spec_props)
 
@@ -343,24 +341,25 @@ class TimeFrequencyMapBase(Spectral):
             # TODO: 'setup alt cbar'
             tmp = ax_cb.get_ylabel()
             self.colour_bar = self.figure.colorbar(im, cax=ax_cb,
-                                                   **self.cb_props)  # ticks=ax_spec.get_xticks(),
+                                                   **self.cb_props)
+            # ticks=ax_spec.get_xticks(),
             ax_cb.set_ylabel(
-                    tmp)  # set the labels (which the previous line killed)
+                tmp)  # set the labels (which the previous line killed)
 
         # TODO: MOVE TO SUBCLASS ?
         ax_map.callbacks.connect('xlim_changed', self.save_background)
         ax_map.callbacks.connect('ylim_changed', self.save_background)
         ax_map.callbacks.connect('ylim_changed', self._set_parasite_ylim)
 
-        self.info_text()
+        # self.info_text()
 
     def save_background(self, _=None):
         # save_background
         print('SAVING BG')
         self.background = self.canvas.copy_from_bbox(self.figure.bbox)
 
-    def _set_parasite_ylim(self,
-                           ax):  # FIXME: obviate by using TimeFreqDualAxes
+    def _set_parasite_ylim(self, ax):
+        # FIXME: obviate by using TimeFreqDualAxes
         print('_set_parasite_ylim', ax.get_ylim())
         self._parasite.set_ylim(ax.get_ylim())
         print('YO')
@@ -399,7 +398,7 @@ class TimeFrequencyMapBase(Spectral):
 
     def mapCoordDisplayFormatter(self, x, y):
 
-        frac = np.divide((x, y), (self.tms[-1], self.frq[-1]))
+        frac = np.divide((x, y), (self.tmid[-1], self.frq[-1]))
         col, row = np.round(frac * self.power.shape, 0).astype(int)
 
         Nrows, Ncols = self.power.shape
@@ -552,15 +551,18 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def ignore_hover(self, event):
-        return not (event.inaxes == self.ax_map and
-                    self.canvas.manager.toolbar._active is None)
+        if event.inaxes != self.ax_map:
+            return True
+
+        return any(self.canvas.manager.toolbar._actions[button].isChecked()
+                   for button in ('pan', 'zoom'))
 
     @mpl_connect('motion_notify_event')
     def _on_motion(self, event):
         if event.inaxes != self.ax_map:
             return
 
-        ix = abs(self.tms - event.xdata).argmin()
+        ix = abs(self.tmid - event.xdata).argmin()
         self.update(ix)
         self.draw_blit()
 
@@ -598,9 +600,8 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
     def _on_button(self, event):
         # print(event.button)
 
-        if event.button == 1:
-            if event.inaxes == self.ax_map:
-                self.highlight_section()
+        if event.button == 1 and event.inaxes == self.ax_map:
+            self.highlight_section()
 
         if event.button == 2:  # restart on middle mouse
             self.restart()
@@ -642,8 +643,6 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
 
 TimeFrequencyRepresentation = TimeFrequencyMap
 
-from .spectral import normaliser
-
 
 class SpectralAudio(TimeFrequencyMap):
     def __init__(self, t, signal, **kws):
@@ -653,7 +652,7 @@ class SpectralAudio(TimeFrequencyMap):
         # calculate spectra
         spec = scipy.fftpack.fft(segments)
         spec = spec[...,
-               :len(self.frq)]  # since we are dealing with real signals
+                    :len(self.frq)]  # since we are dealing with real signals
         self.spectra = spec
         power = np.square(np.abs(spec))
         power = normaliser(power, self.segments, self.opts.normalise, self.dt,
@@ -664,7 +663,7 @@ class SpectralAudio(TimeFrequencyMap):
         ''
 
     def play_segment(self, ix):
-        ix = abs(self.tms - t).argmin()
+        ix = abs(self.tmid - t).argmin()
 
 
 # ****************************************************************************************************
@@ -734,7 +733,7 @@ class SpectralCoherenceMap(TimeFrequencyMapBase):
     def main(self, segA, segB):
         specA = scipy.fftpack.fft(segA)
         specA = specA[...,
-                :len(self.frq)]  # since we are dealing with real signals
+                      :len(self.frq)]  # since we are dealing with real signals
         specB = scipy.fftpack.fft(segB)
         specB = specB[..., :len(self.frq)]
 
