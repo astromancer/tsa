@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 from recipes.string import Percentage
+from recipes.array import fold
 
 from .. import windowing, detrending
 from ..gaps import fill_gaps, get_delta_t_mode, timing_summary  # , windowed
