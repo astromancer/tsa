@@ -180,7 +180,7 @@ def is_uniform(x):
 
 
 def is1d(x):
-    return isinstance(x[0], numbers.Real)
+    return isinstance(x[0], (numbers.Real, np.ma.core.MaskedConstant))
 
 
 def get_labels(labels, signals):
@@ -574,8 +574,6 @@ class TimeSeriesPlot:
         # Do the plotting
 
         # d = y, t, uy, ux, lbls = get_data(data, labels)
-        # from IPython import embed
-        # embed(header="Embedded interpreter at 'ts.py':568")
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # zip_longest in case errors or times are empty sequences
@@ -913,11 +911,11 @@ def plot_folded_lc(ax, phase, stats, p, twice=True, sigma=1., orientation='h',
 #     return '{}{:2,d}ʰ{:02,d}ᵐ'.format(sign, abs(int(h)), int(m))
 
 
-def make_twin(ax, tick_label_angle=0, period=1):
+def make_twin(ax, tick_label_angle=0, period=1, phoff=0):
     from scrawl.ticks import SexagesimalFormatter
 
     # make transform
-    axp = ax.twin(Affine2D().translate(0, 0).scale(1 / period / 86400))  # / 24
+    axp = ax.twin(Affine2D().translate(-phoff, 0).scale(1 / period / 86400))  # / 24
     # make ticks
     axp.xaxis.set_major_locator(ticker.MultipleLocator(30 * 60))
     axp.xaxis.set_major_formatter(
