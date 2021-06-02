@@ -8,7 +8,7 @@ import operator
 import numpy as np
 # import matplotlib.pyplot as plt
 
-import scrawl
+from .plotting import TimeSeriesPlot
 
 # import uncertainties.unumpy as unp  # linear uncertainty propagation
 # since this library is tracking correlations between rvs operations like mean
@@ -287,7 +287,7 @@ class TimeSeries:
     # object.__ceil__(self)
 
     def plot(self, *args, **kws):
-        tsp = scrawl.ts.TimeSeriesPlot()
+        tsp = TimeSeriesPlot()
         # u = self.u if self.u is None else self.u.T
         return tsp.plot(*self, *args, **kws)
 
