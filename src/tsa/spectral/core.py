@@ -3,24 +3,25 @@ Tools for Frequency Spectral Estimation (aka Fourier Analysis)
 """
 
 
-from recipes.functionals import raises
-from scipy.stats import mode
-import functools as ftl
-import warnings as wrn
-import multiprocessing as mp
-import textwrap as txw
+# std libs
 import numbers
+import textwrap as txw
+import warnings as wrn
+import functools as ftl
 
-import matplotlib.pyplot as plt
-import numpy as np
+# third-party libs
 import scipy
-from recipes.string import Percentage
+import numpy as np
+import matplotlib.pyplot as plt
+
+# local libs
 from recipes.array import fold
-
-from .. import windowing, detrending
-from ..gaps import fill_gaps, get_delta_t_mode, timing_summary  # , windowed
-
+from recipes.string import Percentage
+from recipes.functionals import raises
 from recipes.logging import logging, get_module_logger
+
+# relative libs
+from .. import windowing, detrending, timing
 
 
 # module level logger
@@ -392,7 +393,7 @@ class FFTBase:
             if len(t) != len(signal):
                 raise ValueError('Timestamps and signal are unequally sized.')
 
-            dt, _, msg = timing_summary(t)
+            dt, _, msg = timing.summary(t)
             if msg:
                 emit(
                     f'Your timestamp array contains {msg}. The FFT-based methods is not '
