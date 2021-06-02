@@ -22,10 +22,6 @@ from .smoothing import smoother
 import more_itertools as mit
 
 
-# from recipes.string import minlogfmt
-
-# from IPython import embed
-
 # TODO: limit frequency axes at 0 when zooming / panning etc
 # TODO: redo ticklabel precision when zoomed ???
 

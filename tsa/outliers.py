@@ -1,13 +1,16 @@
+
+# std libs
 import warnings
 from collections import defaultdict
 
+# third-party libs
 import numpy as np
 from scipy.signal import get_window
+from astropy.stats import sigma_clipped_stats
 
+# relative libs
 from . import fold
 from .spectral import resolve_overlap
-
-from astropy.stats import sigma_clipped_stats
 
 
 # TODO: OCSVM, Tietjen-Moore, Topological Anomaly detection
@@ -52,6 +55,7 @@ def generalizedESD(x, maxOLs, alpha=0.05, fullOutput=False):
     """
 
     from scipy.stats import t
+
     if maxOLs < 1:
         raise ValueError
 
@@ -92,16 +96,14 @@ def generalizedESD(x, maxOLs, alpha=0.05, fullOutput=False):
     # Prepare return value
     if ofound:
         # There are outliers
-        if not fullOutput:
-            return idx[0:i + 1]
-        else:
+        if fullOutput:
             return idx[0:i + 1], i + 1, R, L, idx
-    else:
-        # No outliers could be detected
-        if not fullOutput:
-            return []
-        else:
-            return [], 0, R, L, idx
+        return idx[0:i + 1]
+
+    # No outliers could be detected
+    if fullOutput:
+        return [], 0, R, L, idx
+    return []
 
 
 # def CovEstOD(data, classifier=None, threshold=0):
@@ -120,14 +122,15 @@ def CovEstOD(data, classifier=None, n=1, **kw):
 
     if classifier is None:
         from sklearn.covariance import EllipticEnvelope
+
         contamination = n / data.shape[0]
         classifier = EllipticEnvelope(support_fraction=1.,
                                       contamination=contamination)
 
     classifier.fit(data)
     outliers, = np.where(classifier.predict(data) == -1)
-
     return outliers
+
 
 def get_ellipse(classifier, **kws):
     from matplotlib.patches import Ellipse
@@ -257,12 +260,11 @@ def sigma_clip_masked(x, siglow=3, sighi=3):
     return np.ma.masked_outside(x, xmed - siglow * xstd, xmed + sighi * xstd)
 
 
-# ====================================================================================================
 def running_sigma_clip(x, sig=3., nwindow=100, noverlap=0, iters=None,
                        cenfunc=np.ma.median, varfunc=np.ma.var):
     # TODO:  Incorporate in WindowOutlierDetection
 
-    # SLOWWWWWWWWW...................
+    # NOTE: SLOWWWWWWWWW...................
 
     if noverlap:
         print('Overlap not implemented yet!  Setting noverlap=0')
@@ -272,8 +274,8 @@ def running_sigma_clip(x, sig=3., nwindow=100, noverlap=0, iters=None,
 
     filtered_data = []
     for sec in sections:
-        filtered_sec = np.ma.masked_where(np.isnan(sec),
-                                          sec)  # BUT WHAT IF THIS IS A MASKED ARRAY ALREADY WITH NON-NAN VALUES MASKED??
+        #
+        filtered_sec = np.ma.masked_where(np.isnan(sec), sec)
 
         if iters is None:
             i = -1
@@ -287,7 +289,7 @@ def running_sigma_clip(x, sig=3., nwindow=100, noverlap=0, iters=None,
                 # print( filtered_sec.mask )
                 # iters = i + 1
         else:
-            for i in range(iters):
+            for _ in range(iters):
                 secdiv = filtered_sec - cenfunc(filtered_sec)
                 filtered_sec.mask |= np.ma.greater(secdiv * secdiv,
                                                    varfunc(secdiv) * sig ** 2)

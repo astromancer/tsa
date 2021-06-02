@@ -400,9 +400,6 @@ class PowerLawSpec(Spectral):
         # plot confidence uppper-limits for spectrum
         # kws.get('clabels', )
 
-        # from IPython import embed
-        # embed()
-
         for i, (gg, lbl) in enumerate(itt.zip_longest(g, clabels)):
             ax.plot(x[::10], op(m[::10], gg), 'k--', dashes=(2 * (i + 1),) * 2,
                     label=lbl)

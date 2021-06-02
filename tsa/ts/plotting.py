@@ -2,26 +2,30 @@
 Versatile functions for plotting time-series data
 """
 
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from cycler import cycler
-from matplotlib import ticker
-from matplotlib.transforms import Affine2D
-import numbers
 
-from .dualaxes import DualAxes, DateTimeDualAxes
-from recipes.logging import logging, get_module_logger
-from attr import attrs, attrib as attr  # , astuple
-from recipes.dicts import AttrDict
-import matplotlib.pyplot as plt
+# std libs
+import numbers
+import warnings as wrn
 import itertools as itt
 
+# third-party libs
 import numpy as np
-import warnings as wrn
-import matplotlib as mpl
+from matplotlib import ticker
+import matplotlib.pyplot as plt
+from matplotlib.transforms import Affine2D
+from attr import attrs, attrib as attr
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from .utils import get_percentile_limits
-from .draggable import DraggableErrorbar
-from .ticks import OffsetLocator
+# local libs
+from scrawl.ticks import OffsetLocator
+from scrawl.draggable import DraggableErrorbar
+from scrawl.utils import get_percentile_limits
+from recipes.dicts import AttrDict
+from recipes.logging import logging, get_module_logger
+
+# relative libs
+from .dualaxes import DualAxes, DateTimeDualAxes
+
 
 # TODO:
 #  alternatively make `class timeseriesPlot(Axes):` then ax.errorbar()
@@ -34,10 +38,6 @@ from .ticks import OffsetLocator
 # import colormaps as cmaps
 # plt.register_cmap(name='viridis', cmap=cmaps.viridis)
 
-
-# from recipes.string import minlogfmt
-
-# from IPython import embed
 
 # from dataclasses import dataclass
 
@@ -558,9 +558,6 @@ class TimeSeriesPlot:
         # Check keyword argument validity
         kws, styles = check_kws(kws)
         show_hist = bool(len(kws.get('hist', {})))
-
-        # from IPython import embed
-        # embed(header="Embedded interpreter at 'ts.py':536")
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # parse data args: times, signals, y_err, x_err
