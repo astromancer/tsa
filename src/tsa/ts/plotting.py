@@ -37,7 +37,6 @@ from scrawl.dualaxes import DualAxes, DateTimeDualAxes
 # plt.register_cmap(name='viridis', cmap=cmaps.viridis)
 
 
-
 # module level logger
 logger = get_module_logger()
 logging.basicConfig()
@@ -58,10 +57,9 @@ DEFAULTS = AttrDict(
     twinx=None,  # Top x-axis display format
     # xscale='linear',
     # yscale='linear',
-    plims=((0, 100),  # x-axis
+    plims=((-1, 101),   # x-axis
            (-1, 101)),  # y-axis
-
-)  # TODO: x, y, upper, lower
+)
 
 # Default options for plotting related stuff
 default_opts = AttrDict(
@@ -248,8 +246,8 @@ def get_data(data, labels):
         signals = auto_transpose(signals, times)
     elif (len(times) != len(signals)):
         # ragged signal list, explicit time stamps
-        raise ValueError('Number of time and signal vectors do not correspond. Please provide explicit time stamps for all signal vectors when plotting ragged time series.'
-                         )
+        raise ValueError(
+            'Number of time and signal vectors do not correspond. Please provide explicit time stamps for all signal vectors when plotting ragged time series.')
 
     # safety breakout for erroneous arguments that can trigger very slow
     # plotting loop
@@ -590,8 +588,9 @@ class TimeSeriesPlot:
         # print('setting lims: ', self.ylim)
         for xy in 'xy':
             lim = getattr(self, f'{xy}lim')
-            if np.isfinite(lim).all():
-                self.ax.set(**{f'{xy}lim': lim})
+            # if np.isfinite(lim).all():
+            self.ax.set(**{f'{xy}lim': lim})
+            # else:
 
         # xlim=self.xlim, ylim=self.ylim,
         # ax.set(xscale=self.kws.xscale, yscale=self.kws.yscale)
@@ -690,18 +689,17 @@ class TimeSeriesPlot:
         self.hist.append(
             self.hax.hist(np.ma.compressed(signal), **props)
         )
-
         self.hax.grid(True)
 
     def set_limits(self, x, y, x_err, y_err):
         # set axes view limits
-        lims = []
-        for xy, p, e in zip((x, y), self.plims, (x_err, y_err)):
-            lims.append(get_percentile_limits(xy, p, e))
 
-        for lim, xy in zip(lims, 'xy'):
-            l, u = getattr(self, f'{xy}lim')
-            new_lim = np.array([min(lim[0], l), max(lim[1], u)])
+        for xy, v, p, e in zip('xy', (x, y), self.plims, (x_err, y_err)):
+            datalim = get_percentile_limits(v, p, e)
+            current = getattr(self, f'{xy}lim')
+            low, hi = zip(datalim, current)
+            new_lim = [min(low), max(hi)]
+            # print(f'xy: {new_lim=}')
 
             # check compat with scale
             scale = getattr(self.ax, f'get_{xy}scale')()
@@ -718,11 +716,10 @@ class TimeSeriesPlot:
                              'Using smallest positive data element as lower '
                              'limit instead.')
                     new_lim[0] = y[~neg].min()
-            # print('new', new_lims)
+            
             # set new limits
-            setattr(self, f'{xy}_lim', new_lim)
-            # print('YLIMS', ylims)
-            # print('lims', 'x', self.xlim, 'y', self.ylim)
+            setattr(self, f'{xy}lim', new_lim)
+            
 
     def set_labels(self, title, axes_labels, twinx, relative_time, t0=''):
         """axis title + labels"""
@@ -908,7 +905,8 @@ def make_twin(ax, tick_label_angle=0, period=1, phoff=0):
     from scrawl.ticks import SexagesimalFormatter
 
     # make transform
-    axp = ax.twin(Affine2D().translate(-phoff, 0).scale(1 / period / 86400))  # / 24
+    axp = ax.twin(Affine2D().translate(-phoff,
+                                       0).scale(1 / period / 86400))  # / 24
     # make ticks
     axp.xaxis.set_major_locator(ticker.MultipleLocator(30 * 60))
     axp.xaxis.set_major_formatter(

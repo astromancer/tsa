@@ -68,7 +68,7 @@ class TimeFrequencyMapBase(Spectrogram):
     cb_props = {}  # dict(format=ticker.FuncFormatter(logformat))
     # defaults = Spectrogram.defaults
 
-    def __init__(self, t, signal, **kws):
+    def __init__(self, t, signal, *args, **kws):
         """ """
         cmap = kws.pop('cmap', 'viridis')
 
@@ -84,8 +84,8 @@ class TimeFrequencyMapBase(Spectrogram):
         show_info = kws.pop('show_info', True)
 
         # Compute spectral estimates
-        Spectrogram.__init__(self, t, signal, **kws)
-
+        Spectrogram.__init__(self, t, signal, *args, **kws)
+        
         self.figure, axes = self.setup_figure(show_lc, show_spec, show_info)
         self.ax_map, self.ax_lc, self.ax_spec, self.ax_cb = axes
         self.plot(axes, t, signal, cmap, lc_props, spec_props)
@@ -197,7 +197,7 @@ class TimeFrequencyMapBase(Spectrogram):
                               direction='inout', pad=0)
             # ax_lc.tick_params(axis='y', which='both', top=True)
 
-            ax_lc.set_ylabel('Flux (counts/s)')
+            ax_lc.set_ylabel('Signal')   # TODO: units!!!!
             ax_lc.grid()
 
         # Get label for power values
@@ -230,7 +230,7 @@ class TimeFrequencyMapBase(Spectrogram):
             ax_cb.yaxis.set_label_position('right')
             ax_cb.set_ylabel(cb_lbl)
 
-        ax_map.set_xlabel('t (s)')
+        ax_map.set_xlabel('Time (s)')
         ax_map.set_ylabel('Frequency (Hz)')
 
         return fig, (ax_map, ax_lc, ax_spec, ax_cb)
@@ -339,8 +339,8 @@ class TimeFrequencyMapBase(Spectrogram):
             self.colour_bar = self.figure.colorbar(im, cax=ax_cb,
                                                    **self.cb_props)
             # ticks=ax_spec.get_xticks(),
-            ax_cb.set_ylabel(
-                tmp)  # set the labels (which the previous line killed)
+            ax_cb.set_ylabel(tmp)  
+            # set the labels (which the previous line killed)
 
         # TODO: MOVE TO SUBCLASS ?
         ax_map.callbacks.connect('xlim_changed', self.save_background)
@@ -419,11 +419,12 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
     _ispec_prop = dict(alpha=0.65,
                        lw=1.5)
 
-    def __init__(self, t, signal, **kws):
+    def __init__(self, t, signal, *args, **kws):
         """ """
-        self.smoothing = kws.pop('smoothing',
-                                 0)  # smoothing for displayed segment spectrum
-        TimeFrequencyMapBase.__init__(self, t, signal, **kws)
+         # smoothing for displayed segment spectrum
+        self.smoothing = kws.pop('smoothing', 0) 
+        
+        TimeFrequencyMapBase.__init__(self, t, signal, *args, **kws)
         # scale segment spectrum to sum of median (for display)
         self.scaling = 1. / self.pwr_p50.sum()
 
