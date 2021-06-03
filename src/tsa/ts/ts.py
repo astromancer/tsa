@@ -10,6 +10,7 @@ import numpy as np
 
 from .plotting import TimeSeriesPlot
 
+
 # import uncertainties.unumpy as unp  # linear uncertainty propagation
 # since this library is tracking correlations between rvs operations like mean
 # on an array is n^2 or n^3 which means its actually too slow to be useful.
@@ -30,12 +31,11 @@ class TimeSeries:
     # This class ties together the functionality of various libraries for
     # analysing time series data.
 
-    # Features
+    # TODO
     # --------
     #  * automatic (linearized) uncertainty propagation (assumes normally
     #    distributed data)
     #  *
-    #  * TODO:
     #   interface with
     #    -statmodels
     #   - pandas
@@ -113,13 +113,7 @@ class TimeSeries:
             return
 
         t = np.asanyarray(t).squeeze()
-        n = self.n
-        if len(t) != n:
-            raise ValueError(
-                f'Unequal number of points between data ({n=}) and time '
-                f'(n={len(t)}) arrays.'
-            )
-
+        self._check_against_x(t, 'time')
         self._t = t
 
     @property
@@ -142,9 +136,23 @@ class TimeSeries:
 
     @u.setter
     def u(self, u):
-        if u is not None:
-            u = np.ma.array(u)
+        if u is None:
+            self._u = None
+            return
+
+        u = np.ma.array(u)
+        self._check_against_x(u, 'uncertainty')
+        if np.any(u < 0):
+            raise ValueError('Cannot have negative uncertainties.')
         self._u = u
+
+    def _check_against_x(self, vector, name):
+        n, m = len(self), len(vector)
+        if m != n:
+            raise ValueError(
+                f'Unequal number of points between data ({n=}) and {name} '
+                f'({m=}) vectors.'
+            )
 
     @property
     def n(self):
@@ -287,8 +295,36 @@ class TimeSeries:
     # object.__ceil__(self)
 
     def plot(self, *args, **kws):
-        return TimeSeriesPlot().plot(*self, *args, **kws)
+        tsp = TimeSeriesPlot()
+        tsp.plot(*self, *args, **kws)
+        tsp.ax.set(xlabel='Time (s)',
+                   ylabel='Signal')
+        return tsp
 
+    def periodogram(self, window=None, detrend=None, pad=None, normalize=None):
+        from tsa.spectral import Periodogram
+
+        return Periodogram(self.t, self.x, window, detrend, pad, normalize)
+
+    def spectrogram(self, nwindow, noverlap=0, window='hanning', detrend=None,
+                    pad=None, split=None, normalize=False):
+        from tsa.spectral import Spectrogram
+
+        return Spectrogram(self.t, self.x,
+                           nwindow, noverlap,
+                           window, detrend,
+                           pad, split, normalize)
+
+    def tfr(self, nwindow, noverlap=0, window='hanning', detrend=None,
+            pad=None, split=None, normalize=False):
+        from tsa.spectral import TimeFrequencyRepresentation as TFR
+
+        tfr = TFR(self.t, self.x,
+                  nwindow, noverlap,
+                  window, detrend,
+                  pad, split, normalize)
+        tfr.connect()
+        return tfr
 
 # class MultiVariateTimeSeries(TimeSeries):
 #     # support for simultaneous multivariate data
