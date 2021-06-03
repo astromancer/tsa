@@ -17,14 +17,12 @@ from attr import attrs, attrib as attr
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # local libs
+from recipes.dicts import AttrDict
+from recipes.logging import logging, get_module_logger
 from scrawl.ticks import OffsetLocator
 from scrawl.draggable import DraggableErrorbar
 from scrawl.utils import get_percentile_limits
-from recipes.dicts import AttrDict
-from recipes.logging import logging, get_module_logger
-
-# relative libs
-from .dualaxes import DualAxes, DateTimeDualAxes
+from scrawl.dualaxes import DualAxes, DateTimeDualAxes
 
 
 # TODO:
@@ -38,8 +36,6 @@ from .dualaxes import DualAxes, DateTimeDualAxes
 # import colormaps as cmaps
 # plt.register_cmap(name='viridis', cmap=cmaps.viridis)
 
-
-# from dataclasses import dataclass
 
 
 # module level logger

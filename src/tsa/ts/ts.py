@@ -287,9 +287,7 @@ class TimeSeries:
     # object.__ceil__(self)
 
     def plot(self, *args, **kws):
-        tsp = TimeSeriesPlot()
-        # u = self.u if self.u is None else self.u.T
-        return tsp.plot(*self, *args, **kws)
+        return TimeSeriesPlot().plot(*self, *args, **kws)
 
 
 # class MultiVariateTimeSeries(TimeSeries):

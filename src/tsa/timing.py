@@ -1,8 +1,12 @@
+
+# std libs
 import itertools as itt
 
+# third-party libs
 import numpy as np
 from scipy import stats
 
+# local libs
 from recipes.lists import flatten
 
 

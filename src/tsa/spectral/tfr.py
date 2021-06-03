@@ -16,8 +16,8 @@ from scrawl.utils import get_percentile_limits
 from scrawl.connect import ConnectionMixin, mpl_connect
 from scrawl.ticks import ReciprocalFormatter
 
-from .spectral import Spectrogram, resolve_nwindow, resolve_overlap
-from .smoothing import smoother
+from . import Spectrogram, resolve_nwindow, resolve_overlap
+from ..smoothing import smoother
 
 import more_itertools as mit
 
@@ -351,22 +351,22 @@ class TimeFrequencyMapBase(Spectrogram):
 
     def save_background(self, _=None):
         # save_background
-        print('SAVING BG')
+        # print('SAVING BG')
         self.background = self.canvas.copy_from_bbox(self.figure.bbox)
 
     def _set_parasite_ylim(self, ax):
         # FIXME: obviate by using TimeFreqDualAxes
-        print('_set_parasite_ylim', ax.get_ylim())
+        # print('_set_parasite_ylim', ax.get_ylim())
         self._parasite.set_ylim(ax.get_ylim())
-        print('YO')
-        print(self._parasite.get_ylim())
-        print('!!')
+        # print('YO')
+        # print(self._parasite.get_ylim())
+        # print('!!')
 
         self._need_save = True
-        print('Done')
+        # print('Done')
 
     def _set_clim(self, ax):
-        print('_set_clim', ax.get_ylim())
+        # print('_set_clim', ax.get_ylim())
         xlim = ax.get_xlim()
         self.im.set_clim(xlim)
         self.colour_bar.set_ticks(self.ax_spec.get_xticks())
@@ -608,7 +608,7 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
 
     @mpl_connect('draw_event')
     def _on_draw(self, event):
-        print('DRAWING', event)
+        # print('DRAWING', event)
         if self._need_save:
             self.save_background()
             # DOESN'T work since it gets executed before the draw is complete
@@ -662,9 +662,7 @@ class SpectralAudio(TimeFrequencyMap):
         ix = abs(self.tmid - t).argmin()
 
 
-# ****************************************************************************************************
 class SpectralCoherenceMap(TimeFrequencyMapBase):
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     def __init__(self, t, signalA, signalB, **kws):
         show_lc = kws.pop('show_lc', False)  # or ('lc_props' in kws)
