@@ -22,6 +22,7 @@ from recipes.logging import logging, get_module_logger
 
 # relative libs
 from .. import windowing, detrending, timing
+from ..ts import TimeSeries
 
 
 # module level logger
@@ -360,10 +361,24 @@ class Normalizer:
 
 
 class FFTBase:
-    def __init__(self, *args, dt=1, fs=None, normalize=None, unit='ADU',
-                 strict=True):
-        *t, signal = args
-        dt, signal = self._check_input(signal, t, dt, fs, strict)
+    """
+    Base class for Fast Fourier Transform based spectral analysis
+    """
+
+    strict = True
+
+    @classmethod
+    def set_strict(cls, b=True):
+        """
+        Controls behaviour when receiving time stamp arrays that have
+        non-constant time step intervals.
+        """
+        cls.strict = bool(b)
+
+    def __init__(self, t_or_x, signal=None, dt=1, normalize=None,  unit='ADU'):
+        # use TimeSeries class to check and sanitize times / signals
+        t, signal, _ = TimeSeries(t_or_x, signal)
+        dt, signal = self._check_input(signal, t, dt)
 
         self.signal = signal
         self.dt = dt
@@ -373,18 +388,26 @@ class FFTBase:
         # normalization
         self.normalizer = Normalizer(normalize, dt, signal_unit=unit)
 
-    @staticmethod
-    def _check_input(signal, t, dt, fs, strict=True):
+    @classmethod
+    def _check_input(cls, signal, t, dt):
 
-        emit = raises(ValueError) if strict else wrn.warn
+        emit = wrn.warn
         if np.ma.is_masked(signal):
-            emit(
-                'Your signal contains masked data points. FFT-based spectral estimation methods are not '
-                'appropriate for time series with non-constant time steps. You '
-                'may wish to first interpolate the missing points, although it '
-                'is probably best to use an analysis technique, such as such as '
-                'the Lomb-Scargle periodogram, which is valid '
-                'for non-constant time steps.')
+            msg = ('Your signal contains masked data points. FFT-based spectral'
+                   ' estimation methods are not appropriate for time series '
+                   'with non-constant time steps. You may wish to first '
+                   'interpolate the missing points, although it is probably '
+                   'best to use an analysis technique, such as such as the '
+                   'Lomb-Scargle periodogram, which is valid for non-constant '
+                   'time steps. ')
+            if cls.strict:
+                emit = raises(ValueError)
+                msg += ('If you wish to proceed with the assumption of constant'
+                        f' timesteps, use \n >>> {cls}.set_strict(False).\nThis'
+                        ' message will then be emitted as a warning instead of '
+                        'rasing an exception')
+            #
+            emit(msg)
 
         # check timing
         if len(t) > 0:
@@ -395,33 +418,22 @@ class FFTBase:
 
             dt, _, msg = timing.summary(t)
             if msg:
-                emit(
-                    f'Your timestamp array contains {msg}. The FFT-based methods is not '
-                    'applicable for time series with non-constant time steps.')
-        else:
+                emit(f'Your timestamp array contains {msg}. The FFT-based '
+                     f'methods is not applicable for time series with non-'
+                     f'constant time steps.')
+        elif not dt:
             # no timestamps
-            if fs and dt:
-                raise ValueError(
-                    'Sampling interval over-specified. Please provide either '
-                    'dt - constant sample time interval,or fs - sampling '
-                    'frequency, not both'
-                )
-
-            if not (fs or dt):
-                raise ValueError(txw.dedent(
-                    '''Please provide one of the following:'
+            raise ValueError(txw.dedent(
+                '''Please provide one of the following:
                         t - sequence of time stamps
-                        dt - constant sample time interval
-                        fs - sampling frequency''')
-                )
-            if fs:
-                dt = 1. / fs
+                        dt - constant sample time interval''')
+            )
 
         return dt, np.array(signal)
 
     @property
     def omega(self):
-        # angular frequencies
+        """angular frequencies"""
         return 2. * np.pi * self.frq
 
     def get_ylabel(self, signal_unit='ADU'):
@@ -439,17 +451,14 @@ class FFTBase:
 class Periodogram(FFTBase):
 
     def __init__(self,
-                 *args,
+                 t_or_x, signal=None,
                  window=None,
                  detrend=None,
                  pad=None,
                  dt=1,
-                 fs=None,
-                 normalize=None,
-                 strict=True):
+                 normalize=None):
 
-        FFTBase.__init__(self, *args, dt=dt, fs=fs, normalize=normalize,
-                         strict=strict)
+        FFTBase.__init__(self, t_or_x, signal, dt, normalize)
 
         n = len(self.signal)
         self.padding = self.npadded, *_ = resolve_padding(pad, n, self.dt)
@@ -521,8 +530,7 @@ class Periodogram(FFTBase):
 #                   norm='normalise',
 #                   overlap='noverlap',
 #                   nperseg='nwindow',
-#                   kct='dt',
-#                   sampling_frequency='fs')
+#                   kct='dt')
 
 # valdict = dict(hours='h', hour='h',
 #                seconds='s', sec='s')
@@ -554,17 +562,15 @@ class Spectrogram(Periodogram):
     # @translate(synonymns) # translate keywords
 
     def __init__(self,
-                 *args,
-                 nwindow,
+                 t_or_x, signal=None,
+                 nwindow=None,
                  noverlap=0,
                  window='hanning',
                  detrend=None,
                  pad=None,
                  split=None,
                  dt=1,
-                 fs=None,
-                 normalize='rms',
-                 strict=True):
+                 normalize=False):
         """
         Compute the spectrogram of a time series. Optional arguments 
         allow for signal de-trending, padding (tapering).
@@ -573,8 +579,7 @@ class Spectrogram(Periodogram):
         Parameters
         ----------
         args :
-            (signal,) - in which case the sampling interval `dt`, or sampling
-                        frequency `fs` must be given.
+            (signal,) - in which case the sampling interval `dt` must be given.
             (t, signal) - in which case the sampling interval `dt` will be 
                           computed from the timestamps `t`.
         t : array-like
@@ -601,8 +606,6 @@ class Spectrogram(Periodogram):
             Name of the spectral window to use, by default 'hanning'
         dt : float, optional
             Sampling interval, by default None
-        fs : float, optional
-            Sampling frequency, by default None
         normalize : str, optional
             Normalization scheme for periodograms, by default 'rms'
 
@@ -611,10 +614,9 @@ class Spectrogram(Periodogram):
         >>>
         """
 
-        # super().__init__(*args, window, detrend, pad, dt, fs, normalize)
+        # super().__init__(*args, window, detrend, pad, dt,  normalize)
 
-        FFTBase.__init__(self, *args, dt=dt, fs=fs,
-                         normalize=normalize, strict=strict)
+        FFTBase.__init__(self, t_or_x, signal, dt, normalize)
 
         # t, signal = prepare_signal(signal, t, self.dt, gaps)
         n = len(self.signal)
