@@ -8,21 +8,22 @@ TODO
 [![GitHub](https://img.shields.io/github/license/astromancer/tsa.svg?color=blue)](https://tsa.readthedocs.io/en/latest/license.html)
  -->
 
-This project is for Time Series Analysis and Frequency Spectal Estimation. It
+This project is for Time Series Analysis and Frequency Spectral Estimation. It
 allows for convenient computation of periodograms and spectrograms (aka Dynamic
-Power Spectrum) as well as enabling plotting of multivariate time series and
+Power Spectra) as well as enabling plotting of multivariate time series and
 interactive Time-Frequency Representations of data.
 
 
 # Install
 
-  ```shell
-  pip install tsa
-  ```
+```shell
+pip install tsa
+```
 
 # Use
 
 ## Time Series
+As an example, let's generate a harmonic signal:
 ```python
 import numpy as np
 from tsa import TimeSeries
@@ -32,7 +33,7 @@ from tsa import TimeSeries
 np.random.seed(54321)
 n = 1000                                        # number of points
 A = 5                                           # amplitude
-ω = 1.35  * 2 * np.pi                           # angular frequency
+ω = 1.35  * 2 * np.pi                           # angular frequency [radians/s]
 t = np.linspace(0, 6, n)                        # time
 signal = A * np.sin(ω * t) + np.random.randn(n)
 errors = np.random.rand(n)                      # uniformly distributed uncertainties
@@ -42,27 +43,35 @@ ts = TimeSeries(t, signal, errors)
 tsp = ts.plot()
 ```
 
-![Time Series Plot](tests/images/test_readme_example_0.png "Basic Time Series Plot")
+![Time Series Plot](https://github.com/astromancer/tsa/blob/master/tests/images/test_readme_example_0.png?raw=True "Basic Time Series Plot")
 
 ## Periodogram
-As an example, we generate a multi-tone harmonic signal:
+As an example, we generate a multi-tone harmonic signal using the built in
+`Harmonic` signal generator.  We compute the periodogram using the
+`TimeSeries.periodogram` method, which returns a plottable `Periodogram` object.
+
 ```python
+import matplotlib.pyplot as plt
 from tsa.ts.generate import Harmonic
 
+# generate the signal
 harmonic = Harmonic(amplitudes=[5, 4.3, 2.7],
                     frequencies=[1.35, 20.27, 51.3])
 ts = TimeSeries(t, harmonic(t))
-# compute the periodogram and plot it
+# compute the periodogram
 pg = ts.periodogram(normalize='rms')
-pg.plot()
+# plot
+fig, (ax0, ax1) = plt.subplots(2, 1)
+ts.plot(ax=ax0)
+pg.plot(ax=ax1)
 ```
-![Periodogram Plot](tests/images/test_readme_example_1.png "Basic Periodogram Plot")
+![Periodogram Plot](https://github.com/astromancer/tsa/blob/master/tests/images/test_readme_example_1.png?raw=True "Basic Periodogram Plot")
 
 
 ## Spectrogram and Time-Frequency Representations
-In this example, we generate an amplitude- and frequency modulated signal.
-Compute the spectrogram and plot a Time-Frequency Representation (TFR) of the
-data.
+To demonstrate the spectrogram, we generate an amplitude- and frequency
+modulated signal. We compute the spectrogram using `TimeSeries.spectrogram`, and
+plot a Time-Frequency Representation of the data.
 
 ```python
 fs = 100                                            # sampling frequency
@@ -75,12 +84,13 @@ a = Harmonic(5, 0.05, np.pi / 4)(t)                 # amplitude (modulated)
 signal = a * np.cos(2 * np.pi * fc * t + (Δf / fm) * np.sin(2 * np.pi * fm * t))
 
 ts = TimeSeries(t, signal)
-tfr = ts.tfr(nwindow=128, noverlap='50%', normalize='rms')
+sg = ts.spectrogram(nwindow=128, noverlap='50%', normalize='rms')
+tfr = sg.plot()
 ```  
 
-![Time Frequency Map](tests/images/test_readme_example_2.png "Time Frequency Map")
+![Time Frequency Map](https://github.com/astromancer/tsa/blob/master/tests/images/test_readme_example_2.png?raw=True "Time Frequency Map")
 
-# Interactive features
+## Interactive features
 To activate the interactive features of the map:
 ```python
 tfr.connect()  
