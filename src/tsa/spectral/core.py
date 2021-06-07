@@ -273,8 +273,8 @@ class Normalizer:
     see:
     Leahy 1983: http://adsabs.harvard.edu/full/1983ApJ...272..256L
     """
-
-    POWER_UNITS = {'rms': '(rms/mean)$^2$ / Hz)',  # '$Hz^{-1}$'
+    # FIXME: rms is a density unit!!!
+    POWER_UNITS = {'rms': '(rms/mean)$^2$ / Hz',  # '$Hz^{-1}$'
                    'leahy': '{}',
                    'pds': '{} / Hz',
                    'leahy density': '{} / Hz'}

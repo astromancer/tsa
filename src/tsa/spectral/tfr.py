@@ -296,7 +296,7 @@ class TimeFrequencyMapBase(Spectrogram):
             Pm_lci, Pm, Pm_uci = np.percentile(P, quartiles, 0)
             self.pwr_p25, self.pwr_p50, self.pwr_p75 = Pm_lci, Pm, Pm_uci
 
-            sm = 5
+            sm = 0
             ax_spec.plot(smoother(Pm, sm), frq, **spec_props)
 
             ax_spec.plot(smoother(Pm_lci, sm), frq, ':',
