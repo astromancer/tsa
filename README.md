@@ -8,17 +8,17 @@ TODO
 [![GitHub](https://img.shields.io/github/license/astromancer/tsa.svg?color=blue)](https://tsa.readthedocs.io/en/latest/license.html)
  -->
 
-This project is for Time Series Analysis and Frequency Spectal Estimation. It
+This project is for Time Series Analysis and Frequency Spectral Estimation. It
 allows for convenient computation of periodograms and spectrograms (aka Dynamic
-Power Spectrum) as well as enabling plotting of multivariate time series and
+Power Spectra) as well as enabling plotting of multivariate time series and
 interactive Time-Frequency Representations of data.
 
 
 # Install
 
-  ```shell
-  pip install tsa
-  ```
+```shell
+pip install tsa
+```
 
 # Use
 
@@ -42,10 +42,12 @@ ts = TimeSeries(t, signal, errors)
 tsp = ts.plot()
 ```
 
-![Time Series Plot](tests/images/test_readme_example_0.png "Basic Time Series Plot")
+
+![Time Series Plot](https://github.com/astromancer/tsa/blob/master/tests/images/test_readme_example_0.png "Basic Time Series Plot")
 
 ## Periodogram
 As an example, we generate a multi-tone harmonic signal:
+
 ```python
 from tsa.ts.generate import Harmonic
 
@@ -80,7 +82,7 @@ tfr = ts.tfr(nwindow=128, noverlap='50%', normalize='rms')
 
 ![Time Frequency Map](tests/images/test_readme_example_2.png "Time Frequency Map")
 
-# Interactive features
+## Interactive features
 To activate the interactive features of the map:
 ```python
 tfr.connect()  
@@ -106,7 +108,7 @@ Contributions are welcome!
 2. Create your feature branch\
     ``git checkout -b feature/rad``
 3. Commit your changes\
-    ``git commit -am 'Add something rad'``
+    ``git commit -am 'Add some cool feature'``
 4. Push to the branch\
     ``git push origin feature/rad``
 5. Create a new Pull Request
@@ -120,7 +122,7 @@ Contributions are welcome!
 
 # License
 
-* see [LICENSE](https://github.com/astromancer/tsa/blob/master/LICENSE.txt)
+* see [LICENSE](LICENSE)
 
 <!-- 
 # Version
