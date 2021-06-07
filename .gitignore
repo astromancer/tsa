@@ -2,8 +2,7 @@
 ###################################
 filters.py
 src/tsa/spectral/csd.py
-_setup.py
-
+.travis.yml
 
 #########################################
 # Editor temporary/working/backup files #
