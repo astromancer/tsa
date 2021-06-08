@@ -9,11 +9,9 @@ from distutils import debug
 from collections import defaultdict
 
 # third-party libs
+from setuptools import Command, setup, find_packages
 from setuptools.command.build_py import build_py
 from setuptools.command.sdist import sdist
-
-
-from setuptools import setup, Command, find_packages
 
 
 debug.DEBUG = True
@@ -52,9 +50,10 @@ class builder(build_py):
         *data, files = zip(*super().find_package_modules(package, package_dir))
         data = dict(zip(files, zip(*data)))
 
-        ex = self.exclude_package_data
-        if package_dir in ex:
-            ex[package] = ex.pop(package_dir)
+        # instrument `exclude_data_files` to filter the gitignore # patterns
+        exclude = self.exclude_package_data
+        if package_dir in exclude:
+            exclude[package] = exclude.pop(package_dir)
 
         keep = self.exclude_data_files(package, package_dir, files)
         return [(*data[file], file) for file in keep]
