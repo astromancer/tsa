@@ -102,11 +102,11 @@ pytest tsa
 # Contribute
 Contributions are welcome!
 
-1. [Fork it!](https://github.com/astromancer/tsa/fork>)
+1. [Fork it!](https://github.com/astromancer/tsa/fork)
 2. Create your feature branch\
     ``git checkout -b feature/rad``
 3. Commit your changes\
-    ``git commit -am 'Add something rad'``
+    ``git commit -am 'Add some cool feature 😎'``
 4. Push to the branch\
     ``git push origin feature/rad``
 5. Create a new Pull Request
@@ -120,7 +120,7 @@ Contributions are welcome!
 
 # License
 
-* see [LICENSE](https://github.com/astromancer/tsa/blob/master/LICENSE.txt)
+* see [LICENSE](https://github.com/astromancer/tsa/blob/master/LICENSE)
 
 <!-- 
 # Version
