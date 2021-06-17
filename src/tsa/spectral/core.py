@@ -273,14 +273,15 @@ class Normalizer:
     see:
     Leahy 1983: http://adsabs.harvard.edu/full/1983ApJ...272..256L
     """
-
-    POWER_UNITS = {'rms': '(rms/mean)$^2$ / Hz)',  # '$Hz^{-1}$'
+    # FIXME: rms is a density unit!!!
+    POWER_UNITS = {'rms': '(rms/mean)$^2$ / Hz',  # '$Hz^{-1}$'
                    'leahy': '{}',
                    'pds': '{} / Hz',
                    'leahy density': '{} / Hz'}
     SYNONYMS = {'power density': 'pds'}
 
-    def __init__(self, how=None, dt=None, signal_unit='ADU'):
+    def __init__(self, how=None, dt=None, signal_unit=''):
+
         if how is True:
             how = 'rms'
 
@@ -319,7 +320,7 @@ class Normalizer:
         # in Leahy 83
         #   N_{\gamma} = DC component of FFT
         #   N_{ph} = total_counts
-        total_counts = np.c_[segments.sum(-1)]
+        total_counts = segments.sum()
 
         # FIXME: are you including the power of the window function?????
 
@@ -340,7 +341,7 @@ class Normalizer:
 
         raise ValueError
 
-    def get_power_unit(self, signal_unit='ADU'):
+    def get_power_unit(self, signal_unit=''):
         return self.POWER_UNITS.get(self.name, '{}').format(signal_unit or '')
 
 
@@ -375,7 +376,8 @@ class FFTBase:
         """
         cls.strict = bool(b)
 
-    def __init__(self, t_or_x, signal=None, dt=1, normalize=None,  unit='ADU'):
+    def __init__(self, t_or_x, signal=None, normalize=None,  unit='',
+                 /, dt=1):
         # use TimeSeries class to check and sanitize times / signals
         t, signal, _ = TimeSeries(t_or_x, signal)
         dt, signal = self._check_input(signal, t, dt)
@@ -436,13 +438,15 @@ class FFTBase:
         """angular frequencies"""
         return 2. * np.pi * self.frq
 
-    def get_ylabel(self, signal_unit='ADU'):
+    def get_ylabel(self, signal_unit=''):
         norm = self.normalizer
         name = norm.name
         power_unit = norm.get_power_unit(signal_unit)
+        if power_unit:
+            power_unit = power_unit.join('()')
         density = name and (('density' in name) or (name == 'pds'))
         density = 'density ' * density
-        return f'Power {density}({power_unit})'
+        return f'Power {density}{power_unit}'
 
     def get_xlabel(self):
         return 'Frequency (Hz)'
@@ -455,10 +459,10 @@ class Periodogram(FFTBase):
                  window=None,
                  detrend=None,
                  pad=None,
-                 dt=1,
-                 normalize=None):
+                 normalize=None,
+                 /, dt=1):
 
-        FFTBase.__init__(self, t_or_x, signal, dt, normalize)
+        FFTBase.__init__(self, t_or_x, signal, normalize, dt=dt)
 
         n = len(self.signal)
         self.padding = self.npadded, *_ = resolve_padding(pad, n, self.dt)
@@ -515,8 +519,8 @@ class Periodogram(FFTBase):
         i = int(not dc)
         line, = ax.plot(self.frq[i:], self.power[i:], **kws)
 
-        power_unit = self.normalizer.get_power_unit(signal_unit)
-        ax.set(xlabel='Frequency (Hz)', ylabel=f'Power ({power_unit})')
+        ax.set(xlabel=self.get_xlabel(),
+               ylabel=self.get_ylabel(signal_unit))
         ax.grid()
         fig.tight_layout()
         return line
@@ -569,8 +573,8 @@ class Spectrogram(Periodogram):
                  detrend=None,
                  pad=None,
                  split=None,
-                 dt=1,
-                 normalize=False):
+                 normalize='rms',
+                 /, dt=1):
         """
         Compute the spectrogram of a time series. Optional arguments 
         allow for signal de-trending, padding (tapering).
@@ -616,7 +620,7 @@ class Spectrogram(Periodogram):
 
         # super().__init__(*args, window, detrend, pad, dt,  normalize)
 
-        FFTBase.__init__(self, t_or_x, signal, dt, normalize)
+        FFTBase.__init__(self, t_or_x, signal, normalize, dt=dt)
 
         # t, signal = prepare_signal(signal, t, self.dt, gaps)
         n = len(self.signal)

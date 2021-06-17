@@ -9,7 +9,7 @@ from scipy.signal import get_window
 from astropy.stats import sigma_clipped_stats
 
 # relative libs
-from . import fold
+from recipes.array import fold
 from .spectral import resolve_overlap
 
 

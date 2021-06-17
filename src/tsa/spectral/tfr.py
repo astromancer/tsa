@@ -187,7 +187,7 @@ class TimeFrequencyMapBase:
                                 direction='inout', pad=0)
             # axes.ts.tick_params(axis='y', which='both', top=True)
 
-            axes.ts.set_ylabel('Flux (counts/s)')
+            axes.ts.set_ylabel('Signal')   # TODO: units!!!!
             axes.ts.grid()
 
         # Get label for power values
@@ -220,7 +220,7 @@ class TimeFrequencyMapBase:
             axes.cbar.yaxis.set_label_position('right')
             axes.cbar.set_ylabel(cb_lbl)
 
-        axes.map.set_xlabel('t (s)')
+        axes.map.set_xlabel('Time (s)')
         axes.map.set_ylabel('Frequency (Hz)')
 
         return fig, axes
