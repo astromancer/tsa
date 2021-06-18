@@ -69,9 +69,12 @@ pg.plot(ax=ax1)
 
 
 ## Spectrogram and Time-Frequency Representations
-To demonstrate the spectrogram, we generate an amplitude- and frequency
-modulated signal. We compute the spectrogram using `TimeSeries.spectrogram`, and
-plot a Time-Frequency Representation of the data.
+To demonstrate the spectrogram, we generate a multi-component signal
+consisting of two superposed time series: 
+* A harmonic signal with constant tone at 10 Hz
+* An amplitude- and frequency modulated signal. 
+We compute the spectrogram using `TimeSeries.spectrogram`, and plot a Time-Frequency
+Representation of the data.
 
 ```python
 fs = 100                                            # sampling frequency
@@ -81,9 +84,10 @@ fm = 0.1                                            # modulation frequency
 duration = 60
 t = np.linspace(0, duration, duration * fs)
 a = Harmonic(5, 0.05, np.pi / 4)(t)                 # amplitude (modulated)
-signal = a * np.cos(2 * np.pi * fc * t + (Δf / fm) * np.sin(2 * np.pi * fm * t))
+signalA = Harmonic(2, 10)(t)
+signalB =  a * np.cos(2 * np.pi * fc * t + (Δf / fm) * np.sin(2 * np.pi * fm * t))
 
-ts = TimeSeries(t, signal)
+ts = TimeSeries(t, signalA + signalB)
 sg = ts.spectrogram(nwindow=128, noverlap='50%', normalize='rms')
 tfr = sg.plot()
 ```  
