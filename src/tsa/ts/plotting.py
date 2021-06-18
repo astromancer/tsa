@@ -3,6 +3,7 @@ Versatile functions for plotting time-series data
 """
 
 
+
 # std libs
 import numbers
 import warnings as wrn
@@ -17,7 +18,7 @@ from attr import attrs, attrib as attr
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # local libs
-from recipes.dicts import AttrDict
+from recipes.dicts import AttrReadItem
 from recipes.logging import logging, get_module_logger
 from scrawl.ticks import OffsetLocator
 from scrawl.draggable import DraggableErrorbar
@@ -25,8 +26,11 @@ from scrawl.utils import get_percentile_limits
 from scrawl.dualaxes import DualAxes, DateTimeDualAxes
 
 
+# FIXME: empty legend by default
+
+
 # TODO:
-#  alternatively make `class timeseriesPlot(Axes):` then ax.errorbar()
+#  alternatively make `class TimeSeriesPlot(Axes):` then ax.errorbar()
 # NOTE: you can probs use the std plt.subplots machinery if you register your
 #  axes classes
 
@@ -44,7 +48,7 @@ logger.setLevel(logging.INFO)
 
 
 # Set parameter defaults
-DEFAULTS = AttrDict(
+DEFAULTS = AttrReadItem(
     # labels=(),
     # title='',
     #
@@ -57,19 +61,19 @@ DEFAULTS = AttrDict(
     twinx=None,  # Top x-axis display format
     # xscale='linear',
     # yscale='linear',
-    plims=((-1, 101),   # x-axis
+    plims=((-1, 101),   # x-axis  # TODO plim.x, plim.y
            (-1, 101)),  # y-axis
 )
 
 # Default options for plotting related stuff
-default_opts = AttrDict(
-    errorbar=dict(fmt='o',
-                      # TODO: sampled lcs from distribution implied by
-                      #  errorbars ?  simulate_samples
-                      ms=2.5,
-                      mec='none',
-                      capsize=0,
-                      elinewidth=0.5),
+default_opts = AttrReadItem(
+    errorbar=dict(fmt='o',  # FIXME: allow marker='o'
+                  # TODO: sampled lcs from distribution implied by
+                  #  errorbars ?  simulate_samples
+                  ms=2.5,
+                  mec='none',
+                  capsize=0,
+                  elinewidth=0.5),
     spans=dict(label='filtered',
                alpha=0.2,
                color='r'),
@@ -98,7 +102,6 @@ class TooManyToPlot(Exception):
     number at which this occurs is determined by the module variable
     `N_MAX_TS_PLOT`
     """
-    pass
 
 
 # TODO: indicate more data points with arrows????????????
@@ -716,10 +719,9 @@ class TimeSeriesPlot:
                              'Using smallest positive data element as lower '
                              'limit instead.')
                     new_lim[0] = y[~neg].min()
-            
+
             # set new limits
             setattr(self, f'{xy}lim', new_lim)
-            
 
     def set_labels(self, title, axes_labels, twinx, relative_time, t0=''):
         """axis title + labels"""
@@ -762,11 +764,11 @@ def convert_mask_to_intervals(a, mask=None):
     if ~np.any(mask):
         return ()
 
-    from recipes.iter import interleave
+    import more_itertools as mit
     w, = np.where(mask)
     l1 = w - np.roll(w, 1) > 1
     l2 = np.roll(w, -1) - w > 1
-    idx = [w[0]] + interleave(w[l2], w[l1]) + [w[-1]]
+    idx = [w[0]] + mit.interleave(w[l2], w[l1]) + [w[-1]]
     return a[idx].reshape(-1, 2)
 
 

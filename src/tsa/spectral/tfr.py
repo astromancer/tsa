@@ -45,28 +45,33 @@ def format_coord_spec(x, y):
 class AxesContainer(AttrReadItem):
     pass
 
+
 class ArtistContainer(AttrReadItem):
     pass
 
 
-class TimeFrequencyMapBase:
+class TimeFrequencyBase:
     """Base class for Time Frequency plots"""
 
-    ts_props = dict(color='g', marker='.', ms=1.5)
+    ts_props = dict(color='g', ms=1.5)
     pg_props = dict(color='g')
     cb_props = {}
+    hatch_props = dict(facecolor='none',
+                       edgecolor='r',
+                       alpha=0.65,
+                       linewidth=1,
+                       hatch='//')
 
     def __init__(self, spectrogram, ts=True, pg=True, info=True, cmap=None,
                  **kws):
         """ """
-        assert isinstance(spectrogram, Spectrogram)
+        # assert isinstance(spectrogram, Spectrogram)
         self.spec = spectrogram
 
-        if isinstance(ts, dict):
-            ts_props = {**self.ts_props, **ts}
-
-        if isinstance(pg, dict):
-            pg_props = {**self.pg_props, **ts}
+        ts_props = {**self.ts_props,
+                    **(ts if isinstance(ts, dict) else {})}
+        pg_props = {**self.pg_props,
+                    **(ts if isinstance(pg, dict) else {})}
 
         # cmap = plt.get_cmap(cmap)
         self.spec_quant = np.array(kws.pop('spec_quant', (0.25, 0.50, 0.75)))
@@ -200,7 +205,7 @@ class TimeFrequencyMapBase:
             axes.spec.xaxis.offsetText.set_visible(False)
 
             # show Period as ticks on right spine of y
-            self._parasite = axp = axes.spec.twinx()
+            axes.spec.parasite = axp = axes.spec.twinx()
 
             # FIXME: ticks WRONG after zoom FUCK!
             axp.yaxis.set_major_formatter(ReciprocalFormatter())
@@ -228,13 +233,12 @@ class TimeFrequencyMapBase:
     def plot(self, spec, cmap, ts_props=None, pg_props=None):
         """ """
         spec = self.spec
-        t, signal = spec.t, spec.signal
-        frq, pwr = spec.frq, spec.power
+        signal, frq, pwr = spec.signal, spec.frq, spec.power
         valid = frq > spec.fRayleigh
-        # NOTE: we intentionally do not mask values below fRayleigh, even though
-        # they are not physicaly meaningful because this often leads to the
-        # appearance of a false "peak" at low frequencies.  Instead, we  hatch
-        # everything below the Rayleigh frequency.
+        # NOTE: we intentionally do not mask power values below fRayleigh, even
+        # though they are not physicaly meaningful because this often leads to
+        # the appearance of a false "peak" at low frequencies.  Instead, we
+        # hatch everything below the Rayleigh frequency.
 
         # guess reasonable colour limits
         plim = (0.25, 99.9)  # colour limits as percentile of power value
@@ -243,7 +247,7 @@ class TimeFrequencyMapBase:
         art = AttrDict()
 
         # Plot TFR image
-        tlims = spec.t_seg[[0, -1], [0, -1]]
+        tlims = spec._ts.t[[0, -1]]
         flims = frq[[0, -1]]
         extent = np.r_[tlims, flims]
         art.image = image = mimage.NonUniformImage(self.axes.map,
@@ -272,20 +276,18 @@ class TimeFrequencyMapBase:
 
         # hatch anything below self.fRayleigh
         polycol = self.axes.map.fill_between(tlims, self.spec.fRayleigh,
-                                             facecolor='none',
-                                             edgecolors='r',
-                                             linewidths=1,
-                                             hatch='\\')
+                                             **self.hatch_props)
 
         if self.axes.ts:
-            # Plot light curve
-            art.ts, = self.axes.ts.plot(t, signal, **(ts_props or {}))
-            # TODO: Uncertainties
-            self.axes.ts.set(xlim=t[[0, -1]],
-                             ylim=get_percentile_limits(signal, (0, 101)))
+            # Plot time series
+            tsp = spec._ts.plot(self.axes.ts,
+                                # FIXME: use DEFAULT values
+                                plims=[(0, 100), (-1, 101)],
+                                errorbar=(ts_props or {}))
+            self.axes.ts.xaxis.set_label_position('top')
 
         if self.axes.spec:
-            self.plot_pgram(pg_props)
+            self.plot_pgram(pg_props, clim=clim)
 
             # show colourbar
             tmp = self.axes.cbar.get_xlabel()
@@ -310,12 +312,12 @@ class TimeFrequencyMapBase:
         self.axes.map.callbacks.connect('xlim_changed', self.save_background)
         self.axes.map.callbacks.connect('ylim_changed', self.save_background)
         self.axes.map.callbacks.connect('ylim_changed', self._set_parasite_ylim)
-        
+
         return art
 
-    def plot_pgram(self, pg_props=None, smoothing=5):
+    def plot_pgram(self, pg_props=None, smoothing=5, clim=None):
         # Plot spectrum (median & inter-quartile range)
-        pwr, frq = self.spec.pwr, self.spec.frq
+        pwr, frq = self.spec.power, self.spec.frq
         quantiles = np.percentile(pwr, self.spec_quant * 100, 0)
         self.pwr_p25, self.pwr_p50, self.pwr_p75 = quantiles
 
@@ -325,8 +327,9 @@ class TimeFrequencyMapBase:
                             **(pg_props or {}))
         # HACK
         # self.axes.spec.plot(smoother(self.pwr_p75, 5), frq, '-', **pg_props)
-
-        self.axes.spec.set(xlim=self.art.image.get_clim(),
+        if clim is None:
+            clim = (None, None)
+        self.axes.spec.set(xlim=clim,
                            ylim=frq[[0, -1]])
         self.axes.spec.parasite.set_ylim(frq[[0, -1]])  # FIXME
 
@@ -334,15 +337,15 @@ class TimeFrequencyMapBase:
 
         # hatch anything below self.fRayleigh
         rinv = Rectangle((0, 0), 1, self.spec.fRayleigh,
-                         facecolor='none', edgecolor='r',
-                         linewidth=1, hatch='\\',
                          transform=btf(self.axes.spec.transAxes,
-                                       self.axes.spec.transData))
+                                       self.axes.spec.transData),
+                         **self.hatch_props)
         self.axes.spec.add_patch(rinv)
 
         # connect callbacks for limit change
         self.axes.spec.callbacks.connect('xlim_changed', self._set_clim)
-        self.axes.spec.callbacks.connect('ylim_changed', self._set_parasite_ylim)
+        self.axes.spec.callbacks.connect(
+            'ylim_changed', self._set_parasite_ylim)
 
     def save_background(self, _ignored=None):
         # save_background
@@ -373,7 +376,7 @@ class TimeFrequencyMapBase:
         spec = self.spec
         nwin, novr = spec.nwindow, spec.noverlap
         info = (
-            f'$\Delta t = {spec.dt:.3f}$ s ($f_s = {spec.fs:.3f}$ Hz)',
+            rf'$\Delta t = {spec.dt:.3f}$ s ($f_s = {spec.fs:.3f}$ Hz)',
             f'window = {spec.window}',
             f'$n_w = {nwin:d}$ ({nwin * spec.dt:.1f} s)',
             f'$n_{{ovr}} = {novr:d}$ ({novr / nwin:.0f%%})'
@@ -384,7 +387,8 @@ class TimeFrequencyMapBase:
             info += ('detrend = %s' % str(spec.detrend),)
 
         txt = '\n'.join(info)
-        return self.axes.info.text(0.05, 1, txt, va='top',
+        return self.axes.info.text(0.05, 1, txt,
+                                   va='top',
                                    transform=self.axes.info.transAxes)
 
     def mapCoordDisplayFormatter(self, x, y):
@@ -398,29 +402,81 @@ class TimeFrequencyMapBase:
         return 'x=%1.3f, y=%1.3f' % (x, y)
 
 
-class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
+class HoverSegment(ArtistContainer):
+
+    props = {
+        'ts':   dict(alpha=0.35),
+        'map':  dict(lw=1,
+                     ls='--')
+    }
+    spec_props = dict(alpha=0.65,
+                      lw=1.5)
+
+    def __init__(self, axes, color='r', **kws):
+        self.figure = axes.ts.figure
+        # instantaneous spectrum
+        self.spectrum, = axes.spec.plot([], [], color, **self.spec_props)
+
+        # window indicator on light curve axes
+        # TODO:  show window shape
+        for name in ('ts', 'map'):
+            ax = axes[name]
+            self[name] = rect = \
+                Rectangle((0, 0), 0, 1,
+                          color=color,
+                          **self.props[name],
+                          transform=btf(ax.transData,
+                                        ax.transAxes))
+            axes[name].add_patch(rect)
+
+        # make map window transparent
+        rect.set_facecolor('none')
+
+    def update(self, x, width, spectrum):
+        # update spectrum
+        self.spectrum.set_data(spectrum)
+
+        # update rectangle for highlighted span
+        for art in self.values():
+            art.set_x(x)
+            art.set_width(width)
+
+    def set_visible(self, b=True):
+        self.ts.set_visible(b)
+        self.map.set_visible(b)
+        self.spectrum.set_visible(b)
+
+    def draw(self):
+        renderer = self.figure._cachedRenderer
+        self.ts.draw(renderer)
+        self.map.draw(renderer)
+        self.spectrum.draw(renderer)
+
+    def remove(self):
+        self.ts.remove()
+        self.map.remove()
+        self.spectrum.remove()
+
+
+class TimeFrequencyMap(TimeFrequencyBase, ConnectionMixin):
     """
     Time Frequency Representation (aka Power Spectral density map)
     Interactive plot elements live in this class
     """
     color_cycle = 'c', 'b', 'm', 'g', 'y', 'orange'
 
-    _span_ts_props = dict(alpha=0.35)
-    _span_map_props = dict(facecolor='none',
-                           lw=1,
-                           ls='--')
-    _ispec_prop = dict(alpha=0.65,
-                       lw=1.5)
-
     def __init__(self, spec, **kws):
         """ """
         # smoothing for displayed segment spectrum
         self.smoothing = kws.pop('smoothing', 0)
 
-        TimeFrequencyMapBase.__init__(self, spec, **kws)
+        self.hovering = False
+        self.icolour = iter(self.color_cycle)
+        # containers for highlighted segments
+        self.hover = None  # placeholder
+        self.windows = []
 
-        # scale segment spectrum to sum of median (for display)
-        # self.scaling = 1. / self.pwr_p50.sum()
+        TimeFrequencyBase.__init__(self, spec, **kws)
 
         # initialize auto-connect
         ConnectionMixin.__init__(self, self.figure)
@@ -430,39 +486,16 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
         # self.save_background()
 
         # TODO: can you subclass widgets.cursor to emulate  desired behaviour??
-        self.hovering = False
-        self.icolour = iter(self.color_cycle)
-        self.spans_ts = []  # container for highlighted segments
-        self.spans_map = []
-        self.spectra = []
 
     def plot(self, spec, cmap, ts_props=None, pg_props=None):
 
-        TimeFrequencyMapBase.plot(self, spec, cmap, ts_props, pg_props)
+        art = TimeFrequencyBase.plot(self, spec, cmap, ts_props, pg_props)
 
         # Initiate elements for interactive display
+        self.hover = art.hover = HoverSegment(self.axes)
         # TODO: only really need these upon connect
-        # instantaneous spectrum
-        self.ispec, = self.axes.spec.plot([], [], 'r', **self._ispec_prop)
 
-        # window indicator on light curve axes
-        # TODO:  Alpha channel for window shape
-        self.span_lc_transform = btf(self.axes.ts.transData,
-                                     self.axes.ts.transAxes)
-        self.span_lc = Rectangle((0, 0), 0, 1,
-                                 color='r',
-                                 **self._span_ts_props,
-                                 transform=self.span_lc_transform)
-        self.axes.ts.add_patch(self.span_lc)
-
-        # window indicator on map axes
-        self.span_map_transform = btf(self.axes.map.transData,
-                                      self.axes.map.transAxes)
-        self.span_map = Rectangle((0, 0), 0, 1,
-                                  edgecolor='r',
-                                  **self._span_map_props,
-                                  transform=self.span_map_transform)
-        self.axes.map.add_patch(self.span_map)
+        return art
 
     def get_spectrum(self, ix, smoothing=0, scaling=1.):  # misnomer?
         """ """
@@ -475,64 +508,31 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
         return np.array([data, self.spec.frq])
 
     def update(self, ix):
-
         # update spectrum
-        spectrum = self.get_spectrum(ix, self.smoothing, )
-        self.ispec.set_data(spectrum)
-
-        # update rectangle for highlighted span
-        tspan = self.spec.t_seg[ix, (0, -1)]
+        spectrum = self.get_spectrum(ix, self.smoothing)
+        x, _ = tspan = self.spec.t_seg[ix, (0, -1)]
         # NOTE padded values not included here
         # TODO: maybe some visual indicator for padding??
-        x = tspan[0]
-        width = tspan.ptp()
-        self.span_lc.set_x(x)
-        self.span_lc.set_width(width)
-
-        self.span_map.set_x(x)
-        self.span_map.set_width(width)
+        self.hover.update(x, tspan.ptp(), spectrum)
 
     def highlight_section(self):
-        # persistent spectrum for this window
-        colour = next(self.icolour)
-        spectrum = self.ispec.get_xydata().T  # instantaneous spectum
-        line, = self.axes.spec.plot(*spectrum, color=colour, **self._ispec_prop)
-        self.spectra.append(line)
-
         # persistent highlight this window
-        span_lc = Rectangle(self.span_lc.xy, self.span_lc.get_width(), 1,
-                            color=colour,
-                            **self._span_ts_props,
-                            transform=self.span_lc_transform)
-        self.axes.ts.add_patch(span_lc)
-        self.spans_ts.append(span_lc)
+        new = HoverSegment(self.axes,  next(self.icolour))
+        new.update(self.hover.ts.xy[0], self.hover.ts.get_width(),
+                   self.hover.spectrum.get_xydata().T)
+        self.windows.append(new)
 
-        span_map = Rectangle(self.span_map.xy, self.span_map.get_width(), 1,
-                             edgecolor=colour,
-                             **self._span_map_props,
-                             transform=self.span_map_transform)
-        self.axes.map.add_patch(span_map)
-        self.spans_map.append(span_map)
+        self.hover.set_visible(False)
 
-        self.span_map.set_visible(False)
-        self.span_lc.set_visible(False)
-        self.ispec.set_visible(False)
         self.draw_blit()
+        new.draw()
 
-        renderer = self.figure._cachedRenderer
-        line.draw(renderer)
-        span_lc.draw(renderer)
-        span_map.draw(renderer)
         self.save_background()
         self.draw_blit()
 
     def draw_blit(self):
-        renderer = self.figure._cachedRenderer
         self.canvas.restore_region(self.background)
-        self.ispec.draw(renderer)
-        self.span_lc.draw(renderer)
-        self.span_map.draw(renderer)
-
+        self.hover.draw()
         self.canvas.blit(self.figure.bbox)
 
         # @mpl_connect( 'draw_event' )
@@ -561,36 +561,30 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
         # print('enter')
         # self.canvas.draw()
 
-        if not self.ignore_hover(event):
-            # NOTE:  if the cursor "leaves" the axes directly onto another window,
-            # the axis leave event is not triggered!!
-            if not self.hovering:  # i.e legitimate axes enter
-                # NOTE: Need to save the background here in case a zoom happened
-                self.save_background()
+        if self.ignore_hover(event):
+            return
 
-            self.hovering = True
+        # NOTE:  if the cursor "leaves" the axes directly onto another window,
+        # the axis leave event is not triggered!!
+        if not self.hovering:  # ie. legitimate axes enter
+            # NOTE: Need to save the background here in case a zoom happened
+            self.save_background()
 
-            self.span_lc.set_visible(True)
-            self.span_map.set_visible(True)
-            self.ispec.set_visible(True)
-            self.draw_blit()
+        self.hovering = True
+        self.hover.set_visible(True)
+        self.draw_blit()
 
     @mpl_connect('axes_leave_event')
     def _leave_axes(self, event):
         # print('leave')
         if event.inaxes == self.axes.map:
-            self.span_lc.set_visible(False)
-            self.span_map.set_visible(False)
-            self.ispec.set_visible(False)
+            self.hover.set_visible(False)
             self.draw_blit()
-
             self.hovering = False
 
     @mpl_connect('button_press_event')
     def _on_button(self, event):
-        # print(event.button)
-
-        if event.button == 1 and event.inaxes == self.axes.map:
+        if (event.button == 1) and (event.inaxes == self.axes.map):
             self.highlight_section()
 
         if event.button == 2:  # restart on middle mouse
@@ -609,18 +603,15 @@ class TimeFrequencyMap(TimeFrequencyMapBase, ConnectionMixin):
             self._need_save = False
 
     def restart(self):
-        self.span_lc.set_visible(False)
-        self.span_map.set_visible(False)
-        self.ispec.set_visible(False)
+        self.hover.set_visible(False)
 
         # reset colour cycle
         self.icolour = iter(self.color_cycle)
-        for art in mit.flatten([self.spans_ts, self.spans_map, self.spectra]):
+
+        for art in (self.hover, *self.windows):
             art.remove()
 
-        self.spans_ts = []
-        self.spans_map = []
-        self.spectra = []
+        self.windows = []
 
         self.canvas.draw()
         self.background = self.canvas.copy_from_bbox(self.figure.bbox)
@@ -655,14 +646,14 @@ TimeFrequencyRepresentation = TimeFrequencyMap
 #         ix = abs(self.tmid - t).argmin()
 
 
-# class SpectralCoherenceMap(TimeFrequencyMapBase):
+# class SpectralCoherenceMap(TimeFrequencyBase):
 
 #     def __init__(self, t, signalA, signalB, **kws):
 #         show_lc = kws.pop('show_lc', False)  # or ('ts_props' in kws)
-#         ts_props = TimeFrequencyMapBase.ts_props.copy()
+#         ts_props = TimeFrequencyBase.ts_props.copy()
 #         ts_props.update(kws.pop('ts_props', {}))
 #         show_spec = kws.pop('show_spec', True)  # or ('pg_props' in kws)
-#         pg_props = TimeFrequencyMapBase.pg_props.copy()
+#         pg_props = TimeFrequencyBase.pg_props.copy()
 #         pg_props.update(kws.pop('pg_props', {}))
 
 #         cmap = kws.pop('cmap', 'viridis')
