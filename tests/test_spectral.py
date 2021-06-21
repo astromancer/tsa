@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 
 # local libs
-from tsa.spectral import Periodogram, TimeFrequencyRepresentation as TFR
+from tsa.spectral import Periodogram
 
 
 np.random.seed(123)
@@ -51,14 +51,14 @@ def test_periodogram(signal):
     check_var_rms(signal, pwr)
 
 
-def test_tfr():
-    # generate data
-    n = int(1e4)        # number of points
-    A = 5               # amplitude
-    ω = 25              # angular frequency
-    t = np.linspace(0, 2 * np.pi, n)
-    signal = A * np.sin(ω * t)
-    noise = np.random.randn(n)
-    y = signal + noise
-
-    tfr = TFR(t, y, )
+# def test_tfr():
+#     # generate data
+#     n = int(1e4)        # number of points
+#     A = 5               # amplitude
+#     ω = 25              # angular frequency
+#     t = np.linspace(0, 2 * np.pi, n)
+#     signal = A * np.sin(ω * t)
+#     noise = np.random.randn(n)
+#     y = signal + noise
+#     spec = Spectrogram(t, y, 128)
+#     tfr = TFR(spec)

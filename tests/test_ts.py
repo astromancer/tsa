@@ -15,7 +15,7 @@ np.random.seed(666)
 n = 50
 t = np.linspace(0, 2 * np.pi, n)
 y = np.sin(3 * t)
-e = np.random.randn(n)
+e = np.random.rand(n)
 m = np.random.rand(n) > 0.8
 ym = np.ma.array(y, mask=m)
 # np.cos(10*t),
