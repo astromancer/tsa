@@ -1,14 +1,13 @@
-from pathlib import Path
+
+# third-party libs
+import pytest
 import numpy as np
 
-from tsa.spectral import Periodogram
-from tsa.spectral import TimeFrequencyRepresentation as TFR
-import pytest
-import re
+# local libs
+from tsa.spectral import Periodogram, TimeFrequencyRepresentation as TFR
+
 
 np.random.seed(123)
-
-
 
 
 def check_parceval(signal, periodogram):
