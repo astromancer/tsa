@@ -58,7 +58,7 @@ class TimeFrequencyBase:
                        linewidth=1,
                        hatch='//')
 
-    def __init__(self, spectrogram, ts=True, pg=True, info=True, cmap=None,
+    def __init__(self, spectrogram, ts=True, pg=True, info=False, cmap=None,
                  percentiles=(25, 50, 75)):
         """ """
         # assert isinstance(spectrogram, Spectrogram)
@@ -73,9 +73,9 @@ class TimeFrequencyBase:
         self.q_levels = np.array(percentiles)
         self.figure, axes = self.setup_figure(bool(ts), bool(pg), bool(info))
         self.axes = AxesContainer(axes)
-        # self.infoText = self.info_text()
+        self.info_text = self.get_info_text() if info else None
 
-        art = self.plot(spectrogram, cmap, ts_props, pg_props)
+        art = self.plot(cmap, ts_props, pg_props)
         self.art = ArtistContainer(art)
 
         self.background = None
@@ -92,9 +92,8 @@ class TimeFrequencyBase:
         # the upper MAYBE ask on SO??
 
         fig = plt.figure(figsize=figsize)
-        rows, cols = 100, 100
         gs = gridspec.GridSpec(
-            rows, cols,
+            100, 100,
             **dict(gridspec_kws or {},
                    hspace=0.02,
                    wspace=0.005,
@@ -190,7 +189,7 @@ class TimeFrequencyBase:
         return fig, axes
 
     def plot(self, cmap, ts_props=None, pg_props=None):
-        """ """
+        
         spec = self.spec
         frq, pwr = spec.frq, spec.power
         valid = frq > spec.fRayleigh
@@ -279,18 +278,18 @@ class TimeFrequencyBase:
         pwr, frq = self.spec.power, self.spec.frq
         percentiles = np.percentile(pwr, self.q_levels, 0)
         ls = {50: '-'}
+        art = {}
         for q, p in zip(self.q_levels, percentiles):
-            self.art[f'pgram{q}'], = self.axes.spec.plot(
+            art[f'pgram{q}'], = self.axes.spec.plot(
                 smoother(p, smoothing), frq, ls.get(q, ':'),
                 **(pg_props or {})
             )
         
         if clim is None:
             clim = (None, None)
-        self.axes.spec.set(xlim=clim,
-                           ylim=frq[[0, -1]])
-        self.axes.spec.parasite.set_ylim(frq[[0, -1]])  # FIXME
-
+        ylim = frq[[0, -1]]
+        self.axes.spec.set(xlim=clim, ylim=ylim)
+        self.axes.spec.parasite.set_ylim(ylim)  # FIXME
         # self.axes.spec.set_xscale('log')
 
         # hatch anything below self.fRayleigh
@@ -304,6 +303,8 @@ class TimeFrequencyBase:
         self.axes.spec.callbacks.connect('xlim_changed', self._set_clim)
         self.axes.spec.callbacks.connect(
             'ylim_changed', self._set_parasite_ylim)
+        
+        return art
 
     def save_background(self, _ignored=None):
         # save_background
@@ -329,7 +330,7 @@ class TimeFrequencyBase:
         self._need_save = True
         # self.save_background()
 
-    def info_text(self):
+    def get_info_text(self):
 
         spec = self.spec
         nwin, novr = spec.nwindow, spec.noverlap

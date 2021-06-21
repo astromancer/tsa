@@ -382,7 +382,7 @@ class FFTBase:
             emit(msg)
 
         # check timing
-        if len(t) > 0:
+        if t is not None:
             # timestamp array
             t = np.squeeze(t)
             if len(t) != len(signal):
