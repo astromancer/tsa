@@ -2,11 +2,9 @@
 Plotting interactive Time Frequency Representations of Time Series data
 """
 
+
 # third-party libs
-from recipes.dicts import AttrDict, AttrReadItem
-import scipy
 import numpy as np
-import more_itertools as mit
 import matplotlib.pyplot as plt
 import matplotlib.image as mimage
 from matplotlib import gridspec, ticker
@@ -14,13 +12,12 @@ from matplotlib.patches import Rectangle
 from matplotlib.transforms import blended_transform_factory as btf
 
 # local libs
+from recipes.dicts import AttrDict, AttrReadItem
 from scrawl.ticks import ReciprocalFormatter
-from scrawl.utils import get_percentile_limits
 from scrawl.connect import ConnectionMixin, mpl_connect
 
 # relative libs
 from ..smoothing import smoother
-from . import Spectrogram, resolve_nwindow, resolve_overlap
 
 
 # TODO: limit frequency axes at 0 when zooming / panning etc
@@ -29,7 +26,6 @@ from . import Spectrogram, resolve_nwindow, resolve_overlap
 # FIXME: unintended highlight when zooming.
 # FIXME: immediately new highlight after selection
 
-# FIXME: repeat code!
 def format_coord_spec(x, y):
     # x = ax.format_xdata(x)
     # y = ax.format_ydata(y)
@@ -63,7 +59,7 @@ class TimeFrequencyBase:
                        hatch='//')
 
     def __init__(self, spectrogram, ts=True, pg=True, info=True, cmap=None,
-                 **kws):
+                 percentiles=(25, 50, 75)):
         """ """
         # assert isinstance(spectrogram, Spectrogram)
         self.spec = spectrogram
@@ -74,8 +70,7 @@ class TimeFrequencyBase:
                     **(ts if isinstance(pg, dict) else {})}
 
         # cmap = plt.get_cmap(cmap)
-        self.spec_quant = np.array(kws.pop('spec_quant', (0.25, 0.50, 0.75)))
-
+        self.q_levels = np.array(percentiles)
         self.figure, axes = self.setup_figure(bool(ts), bool(pg), bool(info))
         self.axes = AxesContainer(axes)
         # self.infoText = self.info_text()
@@ -86,154 +81,118 @@ class TimeFrequencyBase:
         self.background = None
         self._need_save = False
 
-    def setup_figure(self, show_lc=True, show_spec=True, show_info=True,
-                     figsize=(16, 8)):
+    def setup_figure(self, show_ts=True, show_spec=True, show_info=True,
+                     figsize=(11, 6.53), gridspec_kws=None):
         """Setup figure geometry"""
 
-        # TODO limit axes to lower 0 Hz??  OR hatch everything below this somehow
+        # TODO limit axes to lower 0 Hz??  OR hatch everything below this
+        # somehow
         # NOTE: You will need a custom transformation to implement this.
-        # Something that does transAxes for the lower limit, but transData for the upper
-        # MAYBE ask on SO??
+        # Something that does transAxes for the lower limit, but transData for
+        # the upper MAYBE ask on SO??
 
         fig = plt.figure(figsize=figsize)
-        rows_cols = (100, 100)
-        gs = gridspec.GridSpec(*rows_cols,
-                               hspace=0.02,
-                               wspace=0.005,
-                               top=0.96,
-                               left=0.05,
-                               right=0.94 if show_spec else 0.94,
-                               bottom=0.07)
-
-        # if show_spec:
-        # w1, w2 = 80, 20
-        # else:
-        # w1, _ = 98, 2
-
-        axes = AttrDict()
+        rows, cols = 100, 100
+        gs = gridspec.GridSpec(
+            rows, cols,
+            **dict(gridspec_kws or {},
+                   hspace=0.02,
+                   wspace=0.005,
+                   top=0.925,
+                   bottom=0.08,
+                   left=0.05,
+                   right=0.915)  # space for cbar ticks
+        )
 
         # optionally display various axes
-        if show_spec and show_lc:
-            w1, w2 = 80, 20
-            h1, h2, h3 = 30, 69, 1
-            axes.map = fig.add_subplot(gs[h1:-h3, :w1])
-            axes.cbar = fig.add_subplot(gs[-h3:, w1:])
-            axes.ts = fig.add_subplot(gs[:h1, :w1], sharex=axes.map)
-            axes.spec = fig.add_subplot(gs[h1:-h3, w1:], sharey=axes.map)
-
-            if show_info:
-                axes.info = fig.add_subplot(gs[:h1, w1:])
-                # axes.info.set_visible(False)
-                axes.info.patch.set_visible(False)
-                axes.info.tick_params(left=False, labelleft=False,
-                                      bottom=False, labelbottom=False)
-                for _, spine in axes.info.spines.items():
-                    spine.set_visible(False)
-
-        elif show_spec:
-            w1, _ = 80, 20
-            h1, h2, h3 = 0, 99, 1
-            axes.map = fig.add_subplot(gs[h1:-h3, :w1])
-            axes.cbar = fig.add_subplot(gs[-h3:, w1:])
-            axes.ts = fig.add_subplot(gs[:h1, :w1],
-                                      sharex=axes.map) if show_lc else None
-            axes.spec = fig.add_subplot(gs[h1:h2, w1:],
-                                        sharey=axes.map) if show_spec else None
-            fig.subplots_adjust(right=0.95)  # space for cbar ticks
-
-        elif show_lc:
-            w1, _ = 98, 2
-            h1, h2, h3 = 20, 80, 0
-            axes.map = fig.add_subplot(gs[h1:-h3, :w1])
-            axes.cbar = fig.add_subplot(gs[h1:, w1:])
-            axes.ts = fig.add_subplot(gs[:h1, :w1],
-                                      sharex=axes.map) if show_lc else None
-            axes.spec = fig.add_subplot(gs[h1:h2, w1:],
-                                        sharey=axes.map) if show_spec else None
+        axes = AttrDict()
+        if show_spec:
+            # map and ts, and spec
+            w1 = 80
+            h1 = 30 * show_ts
+            h2 = 99
         else:
-            w1, _ = 98, 2
-            h1, h2, h3 = 0, 100, 0
-            axes.map = fig.add_subplot(gs[h1:-h3, :w1])
-            axes.cbar = fig.add_subplot(gs[h1:, w1:])
-            axes.ts = fig.add_subplot(gs[:h1, :w1],
-                                      sharex=axes.map) if show_lc else None
-            axes.spec = fig.add_subplot(gs[h1:h2, w1:],
-                                        sharey=axes.map) if show_spec else None
+            #  no spec
+            w1 = 98
+            h1 = 20 * show_ts
+            h2 = 100
 
-            # add the subplots
-            # axes.map  = fig.add_subplot(gs[h1:-h3, :w1])
-            # axes.cbar   = fig.add_subplot(gs[h2:, w1:])
-            # axes.ts   = fig.add_subplot(gs[:h1, :w1],
-            # sharex=axes.map)    if show_lc    else None
-            # axes.spec = fig.add_subplot(gs[h1:h2, w1:],
-            # sharey=axes.map)    if show_spec  else None
+        # add the subplots
+        axes.map = fig.add_subplot(gs[h1:h2, :w1])
+        axes.cbar = fig.add_subplot(gs[h2:, w1:])
+        if show_ts:
+            axes.ts = fig.add_subplot(gs[:h1, :w1], sharex=axes.map)
+        if show_spec:
+            axes.spec = fig.add_subplot(gs[h1:h2, w1:],
+                                        sharey=axes.map)
+        if show_info:
+            axes.info = fig.add_subplot(gs[:h1, w1:])
+            axes.info.set_axis_off()
 
         # options for displaying various parts
-        minorTickSize = 8
         axes.map.tick_params(which='both', labeltop=False, direction='out')
         axes.map.xaxis.set_minor_locator(ticker.AutoMinorLocator())
         axes.map.yaxis.set_minor_locator(ticker.AutoMinorLocator())
-        # MajForm = ticker.FuncFormatter(lambda x, pos: '{:.2f}'.format(x))
-        # MajForm = formatter_factory( MajForm, tolerance=0.1 )
-        # axes.map.yaxis.set_major_formatter(MajForm)
-        # MinForm = ticker.FuncFormatter(lambda x, pos: '{:.1f}'.format(x).strip('0') )
-        # axes.map.yaxis.set_minor_formatter( MajForm )
-        # #ticker.ScalarFormatter()
-        axes.map.yaxis.set_tick_params('minor', labelsize=minorTickSize)
+        axes.map.yaxis.set_tick_params('minor', labelsize=8)
 
         # Coordinate display format
-        axes.map.format_coord = self.mapCoordDisplayFormatter
+        axes.map.format_coord = self.format_coord_map
 
         # setup_ticks
         if axes.ts:
             # set major/minor xticks invisible on light curve plot
             axes.ts.tick_params(axis='x', which='both',
-                                labelbottom=False, labeltop=True, top=True,
+                                top=True, labeltop=True,
+                                labelbottom=False,
                                 direction='inout', pad=0)
-            # axes.ts.tick_params(axis='y', which='both', top=True)
+            axes.ts.tick_params(axis='y', which='both',
+                                right=True, direction='inout')
 
             axes.ts.set_ylabel('Signal')   # TODO: units!!!!
             axes.ts.grid()
 
         # Get label for power values
-        cb_lbl = self.spec.get_ylabel()
+        cbar_label = self.spec.get_ylabel()
 
         if axes.spec:
+            # show Period as ticks on right spine of y
+            # FIXME: ticks WRONG after zoom !
+            axes.spec.parasite = axp = axes.spec.twinx()
+            axp.yaxis.set_major_formatter(ReciprocalFormatter())
+            axp.yaxis.set_tick_params(left=False, labelleft=False,
+                                      right=False)
+
             # set yticks invisible on frequency spectum plot
-            axes.spec.xaxis.set_tick_params(labelbottom=False, labelleft=False,
-                                            direction='inout', right=True)
             axes.spec.xaxis.offsetText.set_visible(False)
 
-            # show Period as ticks on right spine of y
-            axes.spec.parasite = axp = axes.spec.twinx()
-
-            # FIXME: ticks WRONG after zoom FUCK!
-            axp.yaxis.set_major_formatter(ReciprocalFormatter())
-            axp.yaxis.set_tick_params(left=False, labelleft=False)
-            axes.spec.yaxis.set_tick_params(left=False, labelleft=False)
-            # TODO: same tick positions
-
+            # axes.spec.yaxis.set_tick_params()
+            axes.spec.tick_params(which='both',
+                                  left=False, labelleft=False,
+                                  right=True,
+                                  bottom=False, labelbottom=False,  # cbar gets these
+                                  top=True,
+                                  direction='inout')
             axes.spec.yaxis.set_label_position('right')
-            axes.spec.set_ylabel('Period (s)', labelpad=40)
+            axes.spec.set_ylabel('Period (s)', labelpad=50)
 
-            # axes.spec.set_xlabel(cb_lbl, labelpad=25)
+            # axes.spec.set_xlabel(cbar_label, labelpad=25)
             axes.spec.grid()
             axes.spec.format_coord = format_coord_spec
-            axes.cbar.set_xlabel(cb_lbl)
+            axes.cbar.set_xlabel(cbar_label)
 
         else:
             axes.cbar.yaxis.set_label_position('right')
-            axes.cbar.set_ylabel(cb_lbl)
+            axes.cbar.set_ylabel(cbar_label)
 
         axes.map.set_xlabel('Time (s)')
         axes.map.set_ylabel('Frequency (Hz)')
 
         return fig, axes
 
-    def plot(self, spec, cmap, ts_props=None, pg_props=None):
+    def plot(self, cmap, ts_props=None, pg_props=None):
         """ """
         spec = self.spec
-        signal, frq, pwr = spec.signal, spec.frq, spec.power
+        frq, pwr = spec.frq, spec.power
         valid = frq > spec.fRayleigh
         # NOTE: we intentionally do not mask power values below fRayleigh, even
         # though they are not physicaly meaningful because this often leads to
@@ -318,15 +277,14 @@ class TimeFrequencyBase:
     def plot_pgram(self, pg_props=None, smoothing=5, clim=None):
         # Plot spectrum (median & inter-quartile range)
         pwr, frq = self.spec.power, self.spec.frq
-        quantiles = np.percentile(pwr, self.spec_quant * 100, 0)
-        self.pwr_p25, self.pwr_p50, self.pwr_p75 = quantiles
-
-        self.axes.spec.plot(smoother(self.pwr_p25, smoothing), frq, ':',
-                            smoother(self.pwr_p50, smoothing), frq, '-',
-                            smoother(self.pwr_p75, smoothing), frq, ':',
-                            **(pg_props or {}))
-        # HACK
-        # self.axes.spec.plot(smoother(self.pwr_p75, 5), frq, '-', **pg_props)
+        percentiles = np.percentile(pwr, self.q_levels, 0)
+        ls = {50: '-'}
+        for q, p in zip(self.q_levels, percentiles):
+            self.art[f'pgram{q}'], = self.axes.spec.plot(
+                smoother(p, smoothing), frq, ls.get(q, ':'),
+                **(pg_props or {})
+            )
+        
         if clim is None:
             clim = (None, None)
         self.axes.spec.set(xlim=clim,
@@ -391,9 +349,9 @@ class TimeFrequencyBase:
                                    va='top',
                                    transform=self.axes.info.transAxes)
 
-    def mapCoordDisplayFormatter(self, x, y):
+    def format_coord_map(self, x, y):
         pwr = self.spec.power
-        frac = np.divide((x, y), (self.spec.tmid[-1], self.spec.frq[-1]))
+        frac = np.divide((x, y), (self.spec._ts.t[-1], self.spec.frq[-1]))
         col, row = np.round(frac * pwr.shape, 0).astype(int)
         nrows, ncols = pwr.shape
         if (0 < col < ncols) and (0 < row < nrows):
@@ -465,7 +423,7 @@ class TimeFrequencyMap(TimeFrequencyBase, ConnectionMixin):
     """
     color_cycle = 'c', 'b', 'm', 'g', 'y', 'orange'
 
-    def __init__(self, spec, **kws):
+    def __init__(self, spectrogram, **kws):
         """ """
         # smoothing for displayed segment spectrum
         self.smoothing = kws.pop('smoothing', 0)
@@ -476,7 +434,7 @@ class TimeFrequencyMap(TimeFrequencyBase, ConnectionMixin):
         self.hover = None  # placeholder
         self.windows = []
 
-        TimeFrequencyBase.__init__(self, spec, **kws)
+        TimeFrequencyBase.__init__(self, spectrogram, **kws)
 
         # initialize auto-connect
         ConnectionMixin.__init__(self, self.figure)
@@ -487,9 +445,9 @@ class TimeFrequencyMap(TimeFrequencyBase, ConnectionMixin):
 
         # TODO: can you subclass widgets.cursor to emulate  desired behaviour??
 
-    def plot(self, spec, cmap, ts_props=None, pg_props=None):
+    def plot(self, cmap, ts_props=None, pg_props=None):
 
-        art = TimeFrequencyBase.plot(self, spec, cmap, ts_props, pg_props)
+        art = TimeFrequencyBase.plot(self, cmap, ts_props, pg_props)
 
         # Initiate elements for interactive display
         self.hover = art.hover = HoverSegment(self.axes)
@@ -649,7 +607,7 @@ TimeFrequencyRepresentation = TimeFrequencyMap
 # class SpectralCoherenceMap(TimeFrequencyBase):
 
 #     def __init__(self, t, signalA, signalB, **kws):
-#         show_lc = kws.pop('show_lc', False)  # or ('ts_props' in kws)
+#         show_ts = kws.pop('show_ts', False)  # or ('ts_props' in kws)
 #         ts_props = TimeFrequencyBase.ts_props.copy()
 #         ts_props.update(kws.pop('ts_props', {}))
 #         show_spec = kws.pop('show_spec', True)  # or ('pg_props' in kws)
@@ -703,7 +661,7 @@ TimeFrequencyRepresentation = TimeFrequencyMap
 #         self.power = self.main(self.segmentsA, self.segmentsB)
 
 #         # plot stuff
-#         fig, axes = self.setup_figure(show_lc, show_spec)
+#         fig, axes = self.setup_figure(show_ts, show_spec)
 #         self.axes.map, self.axes.ts, self.axes.spec, self.axes.cbar = axes
 #         self.plot(axes, t, signalA, cmap, ts_props,
 #                   pg_props)  # FIXME: signalB
