@@ -1,6 +1,9 @@
+
+# third-party libs
 import numpy as np
-import pytest
-from tsa.ts import TimeSeries  # , MultiVariateTimeSeries
+
+# local libs
+from tsa.ts import TimeSeries
 from recipes.testing import Expect, mock, ANY, Throws
 
 

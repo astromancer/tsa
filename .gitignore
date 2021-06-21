@@ -2,8 +2,8 @@
 ###################################
 filters.py
 src/tsa/spectral/csd.py
-_setup.py
-
+test_detrend.py
+test_tv.py
 
 #########################################
 # Editor temporary/working/backup files #
