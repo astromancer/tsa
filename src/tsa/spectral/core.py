@@ -235,35 +235,6 @@ def resolve_padding(args, nwindow, dt):
 #     return t, signal
 
 
-def get_segments(signal, dt, nwindow, noverlap):
-    # fold
-    # if nwindow:
-    step = nwindow - noverlap
-    segments = fold.fold(signal, nwindow, noverlap)
-    # padding will happen below for each section
-    t_ = np.arange(nwindow) * dt
-    tstep = np.arange(1, len(segments) + 1) * step * dt
-    t_seg = t_ + tstep[None].T
-    return t_seg, segments
-    # else:
-    # NOTE: unnecessary for uniform sample spacing
-    # leftover = (len(t) - noverlap) % step
-    # end_time = t[-1] + dt * (step - leftover)
-    # t_seg = fold.fold(t, nwindow, noverlap,
-    #                   pad='linear_ramp',
-    #                   end_values=(end_time,))
-
-    # t_seg = fold.fold(t, nwindow, noverlap)
-
-    # else:
-    #     raise NotImplementedError
-    # self.t_seg          = np.split(t, self.opts.split)
-    # self.raw_seg        = np.split(signal, self.opts.split)
-
-    # embed()
-    # assert t_seg.shape == signal.shape
-
-    # return t_seg, segments
 
 
 class Normalizer:
@@ -379,7 +350,7 @@ class FFTBase:
     def __init__(self, t_or_x, signal=None, normalize=None,  unit='',
                  /, dt=1):
         # use TimeSeries class to check and sanitize times / signals
-        t, signal, _ = TimeSeries(t_or_x, signal)
+        t, signal, _ = self._ts = TimeSeries(t_or_x, signal)
         dt, signal = self._check_input(signal, t, dt)
 
         self.signal = signal
@@ -392,7 +363,6 @@ class FFTBase:
 
     @classmethod
     def _check_input(cls, signal, t, dt):
-
         emit = wrn.warn
         if np.ma.is_masked(signal):
             msg = ('Your signal contains masked data points. FFT-based spectral'
@@ -412,7 +382,7 @@ class FFTBase:
             emit(msg)
 
         # check timing
-        if len(t) > 0:
+        if t is not None:
             # timestamp array
             t = np.squeeze(t)
             if len(t) != len(signal):
@@ -522,7 +492,7 @@ class Periodogram(FFTBase):
         ax.set(xlabel=self.get_xlabel(),
                ylabel=self.get_ylabel(signal_unit))
         ax.grid()
-        fig.tight_layout()
+        ax.figure.tight_layout()
         return line
 
 
@@ -555,6 +525,36 @@ class Periodogram(FFTBase):
 #     return opt.lower() in ('ft', 'fourier', 'fft')
 
 
+def get_segments(t, signal, nwindow, noverlap):
+    # fold
+    # if nwindow:
+    # step = nwindow - noverlap
+    segments = fold.fold(signal, nwindow, noverlap)
+    t_seg = fold.fold(t, nwindow, noverlap)
+    # padding will happen below for each section
+    # t_ = np.arange(nwindow) * dt
+    # tstep = np.arange(1, len(segments) + 1) * step * dt
+    # t_seg = t_ + tstep[None].T
+    return t_seg, segments
+
+    # else:
+    # NOTE: unnecessary for uniform sample spacing
+    # leftover = (len(t) - noverlap) % step
+    # end_time = t[-1] + dt * (step - leftover)
+    # t_seg = fold.fold(t, nwindow, noverlap,
+    #                   pad='linear_ramp',
+    #                   end_values=(end_time,))
+    # else:
+    #     raise NotImplementedError
+    # self.t_seg          = np.split(t, self.opts.split)
+    # self.raw_seg        = np.split(signal, self.opts.split)
+
+    # embed()
+    # assert t_seg.shape == signal.shape
+
+    # return t_seg, segments
+
+
 class Spectrogram(Periodogram):
     """
     Spectral estimation routines:
@@ -576,9 +576,8 @@ class Spectrogram(Periodogram):
                  normalize='rms',
                  /, dt=1):
         """
-        Compute the spectrogram of a time series. Optional arguments 
-        allow for signal de-trending, padding (tapering).
-
+        Compute the spectrogram of a time series. Optional arguments allow for
+        signal de-trending, padding (tapering).
 
         Parameters
         ----------
@@ -630,8 +629,10 @@ class Spectrogram(Periodogram):
             resolve_padding(pad, nwindow, self.dt)
 
         # fold
-        self.t_seg, segments = get_segments(
-            self.signal, self.dt, nwindow, noverlap)
+        # self.t_seg, segments = get_segments(
+        #     self.signal, self.dt, nwindow, noverlap)
+        segments = fold.fold(signal, nwindow, noverlap)
+        self.t_seg = fold.fold(self._ts.t, nwindow, noverlap)
 
         # calculate periodograms
         self.power = self.compute(segments, detrend, pad, window)
@@ -651,6 +652,8 @@ class Spectrogram(Periodogram):
         # self.power = periodogram(self.segments, normalize, dt)
         # self.normed = normalize
 
+    
+    
     @property
     def fRayleigh(self):
         return 1. / (self.nwindow * self.dt)
@@ -664,3 +667,8 @@ class Spectrogram(Periodogram):
             return np.mean(self.t_seg[:, [d, d + 1]], 0)
 
         return self.t_seg[:, d]
+
+    def plot(self):
+        from .tfr import TimeFrequencyRepresentation
+
+        return TimeFrequencyRepresentation(self)

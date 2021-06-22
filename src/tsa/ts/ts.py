@@ -8,7 +8,7 @@ import operator
 import numpy as np
 # import matplotlib.pyplot as plt
 
-from .plotting import TimeSeriesPlot
+from .plotting import TimeSeriesPlot, DEFAULTS
 
 
 # import uncertainties.unumpy as unp  # linear uncertainty propagation
@@ -294,9 +294,9 @@ class TimeSeries:
     # object.__floor__(self)
     # object.__ceil__(self)
 
-    def plot(self, *args, **kws):
-        tsp = TimeSeriesPlot()
-        tsp.plot(*self, *args, **kws)
+    def plot(self, ax=None, title='', hist=(), plims=DEFAULTS.plims, **kws):
+        tsp = TimeSeriesPlot(ax, title, hist, plims)
+        tsp.plot(*self, **kws)
         tsp.ax.set(xlabel='Time (s)',
                    ylabel='Signal')
         return tsp
@@ -315,16 +315,6 @@ class TimeSeries:
                            window, detrend,
                            pad, split, normalize)
 
-    def tfr(self, nwindow, noverlap=0, window='hanning', detrend=None,
-            pad=None, split=None, normalize=False):
-        from tsa.spectral import TimeFrequencyRepresentation as TFR
-
-        tfr = TFR(self.t, self.x,
-                  nwindow, noverlap,
-                  window, detrend,
-                  pad, split, normalize)
-        tfr.connect()
-        return tfr
 
 # class MultiVariateTimeSeries(TimeSeries):
 #     # support for simultaneous multivariate data
