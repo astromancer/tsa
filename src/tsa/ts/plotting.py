@@ -21,7 +21,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from recipes.dicts import AttrReadItem
 from recipes.logging import logging, get_module_logger
 from scrawl.ticks import OffsetLocator
-from scrawl.draggable import DraggableErrorbar
+from scrawl.moves import DraggableErrorbar
 from scrawl.utils import get_percentile_limits
 from scrawl.dualaxes import DualAxes, DateTimeDualAxes
 

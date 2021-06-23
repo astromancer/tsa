@@ -10,12 +10,11 @@ from recipes.misc import is_interactive
 from obstools.psf.model import Model
 
 from .spectral import Spectral, normaliser
-from .rednoise import *
 
 
 
 def rescale(data, interval=(-1, 1)):
-    '''Linearly rescale data to fall within given interval'''
+    """Linearly rescale data to fall within given interval"""
     data = np.asarray(data)
     dmin, dmax = data.min(), data.max()
     imin, imax = sorted(interval)
@@ -33,11 +32,7 @@ def best_int_dtype(data):
 
 def rescale_int(data, dtype=None):
     """Convert to integer array for saving as wav"""
-    if dtype is None:
-        dtype = best_int_dtype(data)
-    else:
-        dtype = np.dtype(dtype)
-
+    dtype = best_int_dtype(data) if dtype is None else np.dtype(dtype)
     if not isinstance(dtype.type(), np.integer):
         raise ValueError('Please give valid dtype')
 
@@ -49,20 +44,19 @@ def rescale_int(data, dtype=None):
 def monotone(f, duration=1, fs=44100):
     """A pure sinusoidal tone"""
     t = np.linspace(0, duration, fs * duration)
-    signal = np.cos(2 * np.pi * f * t)
-    return signal
+    return np.cos(2 * np.pi * f * t)
 
-#def multitone(frqs, duration=1, fs=44100):
+# def multitone(frqs, duration=1, fs=44100):
 
 
 def play(signal, rate):
     if is_interactive():
         return Audio(data=signal, rate=rate, autoplay=True)
-    else:
-        with sd.open('w') as dev:
-            dev.setfmt(sd.AFMT_S16_LE)
-            dev.speed(rate)
-            dev.writeall(signal)
+
+    with sd.open('w') as dev:
+        dev.setfmt(sd.AFMT_S16_LE)
+        dev.speed(rate)
+        dev.writeall(signal)
 
 
 class PianoKeys():
@@ -147,11 +141,12 @@ class PianoKeys():
         return Audio(data=signal, rate=44100, autoplay=True)
 
 
-def FrequencyModulator(data, duration, fs=44.1e3, phase=0, fcarrier=None, fdev=None):
-    '''
+def FrequencyModulator(data, duration, fs=44.1e3, phase=0, fcarrier=None,
+                       fdev=None):
+    """
     data : information to be transmitted (i.e., the baseband signal)
     fcarrier : carrier's base frequency
-    fdev : frequency deviation (represents the maximum shift away from the carrier frequency)'''
+    fdev : frequency deviation (represents the maximum shift away from the carrier frequency)"""
 
     t = np.linspace(0, duration, fs * duration)
     dmin, dmax = data.min(), data.max()
@@ -165,14 +160,16 @@ def FrequencyModulator(data, duration, fs=44.1e3, phase=0, fcarrier=None, fdev=N
     rescaled = rescale(data, (-1, 1))
 
     # generate FM signal:
-    return np.cos(2 * np.pi * (fcarrier * t + fdev * np.cumsum(rescaled)) + phase)
+    return np.cos(
+        2 * np.pi * (fcarrier * t + fdev * np.cumsum(rescaled)) + phase)
 
 
 class AudifySpec(Spectral):
     def main(self, segments):  # calculate_spectra
         # calculate spectra
         spec = scipy.fftpack.fft(segments)
-        spec = spec[..., :len(self.frq)]  # since we are dealing with real signals
+        # since we are dealing with real signals
+        spec = spec[..., :len(self.frq)]
         self.spectra = spec
         power = np.square(np.abs(spec))
         power = normaliser(power, self.segments, self.opts.normalise,
@@ -183,8 +180,3 @@ class AudifySpec(Spectral):
 
         n = int(duration * rate)
         ifft = scipy.fftpack.ifft(self.spectra[i], n)
-
-
-
-
-

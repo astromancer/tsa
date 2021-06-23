@@ -1,5 +1,5 @@
 """
-Tools for Frequency Spectral Estimation (aka Fourier Analysis)
+Tools for Frequency Spectral Estimation (a.k.a. Fourier Analysis)
 """
 
 
