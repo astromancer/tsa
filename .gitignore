@@ -4,6 +4,9 @@ filters.py
 src/tsa/spectral/csd.py
 test_detrend.py
 test_tv.py
+audify.py
+rednoise.py
+pdm.py
 
 #########################################
 # Editor temporary/working/backup files #
