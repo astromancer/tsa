@@ -23,8 +23,11 @@ from tsa.ts.generate import Harmonic
 
 RGX_EXAMPLE = re.compile(r'(?s)\n\s*```python\s+(.+?)```')
 
+HERE = Path()
+README = HERE.parent / 'README.md'
 
-def get_readme_examples(filename='../README.md'):
+
+def get_readme_examples(filename=README):
     # sourcery skip: hoist-statement-from-loop
     readme = Path(filename).read_text()
     for match in RGX_EXAMPLE.finditer(readme):
