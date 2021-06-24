@@ -5,6 +5,6 @@ scikit_learn
 more_itertools
 astropy
 matplotlib
-obstools
-recipes
-scrawl
+git+https://github.com/astromancer/obstools
+git+https://github.com/astromancer/recipes
+git+https://github.com/astromancer/scrawl

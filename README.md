@@ -17,7 +17,7 @@ interactive Time-Frequency Representations of data.
 # Install
 
 ```shell
-pip install tsa
+pip install https://github.com/astromancer/tsa
 ```
 
 # Use
