@@ -5,7 +5,7 @@ import functools as ftl
 import itertools as itt
 
 
-# from recipes.decor.base import DecoratorBase
+# from recipes.decorators.base import DecoratorBase
 
 class map_to_array(object):
     def __init__(self, fun, array):

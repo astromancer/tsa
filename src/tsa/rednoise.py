@@ -542,7 +542,7 @@ if __name__ == '__main__':
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
     from matplotlib.colors import colorConverter
 
-    from recipes.decor.profile.timers import timer_dev
+    from recipes.decorators.profile.timers import timer_dev
 
     rcParams["text.latex.preamble"].append(r'\usepackage{amsfonts}')
     rcParams["text.usetex"] = True
@@ -606,7 +606,7 @@ if __name__ == '__main__':
 
     def test_profile():
         # from line_profiler import LineProfiler
-        from recipes.decor.profile import HLineProfiler
+        from recipes.decorators.profile import HLineProfiler
 
         # from recipes.io.tracewarn import warning_traceback_on
         # warning_traceback_on()
