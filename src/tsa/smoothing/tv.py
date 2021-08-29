@@ -4,7 +4,7 @@
 
 import numbers
 
-# third-party libs
+# third-party
 import numpy as np
 from scipy.optimize import minimize
 

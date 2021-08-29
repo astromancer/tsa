@@ -3,7 +3,7 @@ Plotting interactive Time Frequency Representations of Time Series data
 """
 
 
-# third-party libs
+# third-party
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.image as mimage
@@ -11,12 +11,12 @@ from matplotlib import gridspec, ticker
 from matplotlib.patches import Rectangle
 from matplotlib.transforms import blended_transform_factory as btf
 
-# local libs
+# local
 from recipes.dicts import AttrDict, AttrReadItem
 from scrawl.ticks import ReciprocalFormatter
 from scrawl.connect import ConnectionMixin, mpl_connect
 
-# relative libs
+# relative
 from ..smoothing import smoother
 
 

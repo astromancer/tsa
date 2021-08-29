@@ -4,12 +4,12 @@ Versatile functions for plotting time-series data
 
 
 
-# std libs
+# std
 import numbers
 import warnings as wrn
 import itertools as itt
 
-# third-party libs
+# third-party
 import numpy as np
 from matplotlib import ticker
 import matplotlib.pyplot as plt
@@ -17,7 +17,7 @@ from matplotlib.transforms import Affine2D
 from attr import attrs, attrib as attr
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-# local libs
+# local
 from recipes.dicts import AttrReadItem
 from recipes.logging import logging, get_module_logger
 from scrawl.ticks import OffsetLocator

@@ -3,24 +3,24 @@ Tools for Frequency Spectral Estimation (a.k.a. Fourier Analysis)
 """
 
 
-# std libs
+# std
 import numbers
 import textwrap as txw
 import warnings as wrn
 import functools as ftl
 
-# third-party libs
+# third-party
 import scipy
 import numpy as np
 import matplotlib.pyplot as plt
 
-# local libs
+# local
 from recipes.array import fold
 from recipes.string import Percentage
 from recipes.functionals import raises
 from recipes.logging import logging, get_module_logger
 
-# relative libs
+# relative
 from .. import windowing, detrending, timing
 from ..ts import TimeSeries
 

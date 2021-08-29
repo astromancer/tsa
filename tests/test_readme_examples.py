@@ -6,12 +6,12 @@
 # pylint: disable=unused-import
 
 
-# std libs
+# std
 import re
 import itertools as itt
 from pathlib import Path
 
-# third-party libs
+# third-party
 import pytest
 import numpy as np
 import matplotlib.pyplot as plt

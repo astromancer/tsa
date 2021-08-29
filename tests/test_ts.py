@@ -1,8 +1,8 @@
 
-# third-party libs
+# third-party
 import numpy as np
 
-# local libs
+# local
 from tsa.ts import TimeSeries
 from recipes.testing import Expected, mock, PASS, Throws
 

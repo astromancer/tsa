@@ -1,14 +1,14 @@
 
-# std libs
+# std
 import warnings
 from collections import defaultdict
 
-# third-party libs
+# third-party
 import numpy as np
 from scipy.signal import get_window
 from astropy.stats import sigma_clipped_stats
 
-# relative libs
+# relative
 from recipes.array import fold
 from .spectral import resolve_overlap
 
