@@ -14,7 +14,7 @@ from matplotlib.transforms import blended_transform_factory as btf
 # local libs
 from recipes.dicts import AttrDict, AttrReadItem
 from scrawl.ticks import ReciprocalFormatter
-from scrawl.connect import ConnectionMixin, mpl_connect
+from scrawl.moves import CallbackManager, mpl_connect
 
 # relative libs
 from ..smoothing import smoother
@@ -341,9 +341,9 @@ class TimeFrequencyBase:
             f'$n_{{ovr}} = {novr:d}$ ({novr / nwin:.0f%%})'
         )
         if spec.pad:
-            info += ('pad = %s' % str(spec.pad),)
+            info += (f'pad = {spec.pad}', )
         if spec.detrend:
-            info += ('detrend = %s' % str(spec.detrend),)
+            info += (f'detrend = {spec.detrend}', )
 
         txt = '\n'.join(info)
         return self.axes.info.text(0.05, 1, txt,
@@ -417,7 +417,7 @@ class HoverSegment(ArtistContainer):
         self.spectrum.remove()
 
 
-class TimeFrequencyMap(TimeFrequencyBase, ConnectionMixin):
+class TimeFrequencyMap(TimeFrequencyBase, CallbackManager):
     """
     Time Frequency Representation (aka Power Spectral density map)
     Interactive plot elements live in this class
@@ -438,7 +438,7 @@ class TimeFrequencyMap(TimeFrequencyBase, ConnectionMixin):
         TimeFrequencyBase.__init__(self, spectrogram, **kws)
 
         # initialize auto-connect
-        ConnectionMixin.__init__(self, self.figure)
+        CallbackManager.__init__(self, self.figure)
 
         # save background for blitting
         # self.canvas.draw()

@@ -1,0 +1,37 @@
+
+plotting:
+    timescale:    s
+    start:        null
+
+    axes_labels:
+        x:  ['t (s)', '']  # bottom and top x-axes
+        y:  Counts
+
+    # TODO: axes_label_position: (left right center <>^)
+    twinx:        null  # Top x-axis display format
+    # xscale: 'linear'
+    # yscale: 'linear'
+    plims:      [[-1, 101],   # x-axis
+                 [-1, 101]]   # y-axis
+
+    errorbar:
+        fmt:            o
+        ms:             2.5
+        mec:            none
+        capsize:        0
+        elinewidth:     0.5
+    spans:
+        label:          filtered
+        alpha:          0.2
+        color:          r
+    hist:
+        bins:           50
+        alpha:          0.75
+        # color:        b
+        orientation:    horizontal
+    legend:
+        loc:            upper right  # TODO: option for no legend
+        fancybox:       True
+        framealpha:     0.25
+        numpoints:      1
+        markerscale:    3

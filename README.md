@@ -97,7 +97,7 @@ tfr = sg.plot()
 ## Interactive features
 To activate the interactive features of the map:
 ```python
-tfr.connect()  
+tfr.connect()
 ```
 
 <!-- For more examples see [Documentation]() -->

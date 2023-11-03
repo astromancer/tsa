@@ -114,7 +114,7 @@ def fill_array(x, indices, fillers):
 
 
 def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True,
-              return_index=False):
+              indexed=False):
     # NOTE THIS IS A HACK. Better to model the signal well enough so you
     # can generate data from model to fill gaps
     """ """

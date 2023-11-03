@@ -4,12 +4,12 @@ import numpy as np
 
 # local libs
 from tsa.ts import TimeSeries
-from recipes.testing import Expect, mock, ANY, Throws
+from recipes.testing import Expected, mock, PASS, Throws
 
 
 # pylint: disable=missing-function-docstring
 
-# generate some dat
+# generate some data
 np.random.seed(666)
 
 n = 50
@@ -26,23 +26,23 @@ t2 = np.linspace(0, np.pi, n2)
 y2 = np.random.randn(3, n2)
 
 
-# 
+#
 
 # class TestTimeSeries:
 
-test_init = Expect(TimeSeries)({
-     # basic, implicit time index
-        mock.TimeSeries(y):                             ANY,
-        # multivariate, implicit time index
-        mock.TimeSeries(y2):                            ANY,
-        # explicit time index
-        mock.TimeSeries(t, y):                          ANY,
-        # with uncertainties
-        mock.TimeSeries(t, y, e):                       ANY,
-        # masked data
-        mock.TimeSeries(t, ym, e):                      ANY,
-        # negative uncertainties not allowed
-        mock.TimeSeries(t, y, -np.ones_like(y)):        Throws(ValueError)
+test_init = Expected(TimeSeries)({
+    # basic, implicit time index
+    mock.TimeSeries(y):                             PASS,
+    # multivariate, implicit time index
+    mock.TimeSeries(y2):                            PASS,
+    # explicit time index
+    mock.TimeSeries(t, y):                          PASS,
+    # with uncertainties
+    mock.TimeSeries(t, y, e):                       PASS,
+    # masked data
+    mock.TimeSeries(t, ym, e):                      PASS,
+    # negative uncertainties not allowed
+    mock.TimeSeries(t, y, -np.ones_like(y)):        Throws(ValueError)
 })
 
 
