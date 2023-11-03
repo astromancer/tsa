@@ -1,6 +1,10 @@
+# std
 import itertools as itt
 
+# third-party
 import numpy as np
+
+# relative
 from ..windowing import get_window
 
 
@@ -9,7 +13,6 @@ def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
     # TODO: smooth (filter) in timescale (use astropy.units?)
 
     # todo: compare astropy smoother ??
-
     """
     Generic smoothing routine able to handle masked arrays
 
@@ -65,8 +68,7 @@ def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
     y = np.convolve(w, s, mode='valid')
 
     # return
-    output_masked = output_masked or np.ma.is_masked(x)
-    if output_masked:
+    if output_masked := (output_masked or np.ma.is_masked(x)):
         # re-mask values
         return np.ma.array(y[pl:-ph + 1], mask=x.mask)
 

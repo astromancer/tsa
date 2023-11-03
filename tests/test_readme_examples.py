@@ -21,6 +21,10 @@ from tsa.ts import TimeSeries
 from tsa.spectral import Periodogram
 from tsa.ts.generate import Harmonic
 
+# ---------------------------------------------------------------------------- #
+# project folder
+SRC = Path(__file__).parent.parent
+
 RGX_EXAMPLE = re.compile(r'(?s)\n\s*```python\s+(.+?)```')
 
 HERE = Path()

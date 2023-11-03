@@ -4,10 +4,9 @@ Tools for Frequency Spectral Estimation (a.k.a. Fourier Analysis)
 
 
 # std
-import numbers
 import textwrap as txw
-import warnings as wrn
 import functools as ftl
+from warnings import warn
 
 # third-party
 import scipy
@@ -16,26 +15,19 @@ import matplotlib.pyplot as plt
 
 # local
 from recipes.array import fold
-from recipes.string import Percentage
 from recipes.functionals import raises
-from recipes.logging import logging, get_module_logger
 
 # relative
-from .. import windowing, detrending, timing
+from .. import detrending, timing, windowing
 from ..ts import TimeSeries
 
 
-# module level logger
-logger = get_module_logger()
-logging.basicConfig()
-logger.setLevel(logging.INFO)
-
-
+# ---------------------------------------------------------------------------- #
 NORMS = (None, True, False, 'rms', 'pds', 'leahy', 'leahy density')
 PADDING = ('constant', 'mean', 'median', 'minimum', 'maximum', 'reflect',
            'symmetric', 'wrap', 'linear_ramp', 'edge')
 
-
+# ---------------------------------------------------------------------------- #
 # TODO: subclass for LS TFR
 #   methods for non-uniform window length??
 #   functions for plotting segments etc...
@@ -118,43 +110,12 @@ def resolve_nwindow(nwindow, split, n, dt):
         [description]
     """
     if nwindow is None:
-        if split is None:
-            # No segmentation
-            return n
-
-        # *split* number of segments
-        return n // int(split)
+        return n if split is None else n // int(split)
 
     if isinstance(nwindow, str):
         return _from_unit_string(nwindow, dt)
 
     return int(nwindow)
-
-
-def convert_size(nwindow, size, dt, name):
-    if not bool(size):
-        return 0
-
-    # overlap specified by percentage string eg: 99% or timescale eg: 60s
-    if isinstance(size, str):
-        # percentage
-        if size.endswith('%'):
-            size = round(Percentage(size).of(nwindow))
-        # units
-        else:
-            size = _from_unit_string(size, dt)
-
-    if isinstance(size, numbers.Real):
-        return round(size)
-
-    raise ValueError(f'Invalid value for {name}={size}')
-
-
-def _from_unit_string(size, dt):
-    if size.endswith('s'):
-        return round(float(size.strip('s')) / dt)
-
-    raise NotImplementedError
 
 
 def resolve_overlap(nwindow, noverlap, dt=None):
@@ -177,15 +138,15 @@ def resolve_overlap(nwindow, noverlap, dt=None):
     [type]
         [description]
     """
-    noverlap = convert_size(nwindow, noverlap, dt, 'noverlap')
+    noverlap = windowing.resolve_size(noverlap, nwindow, dt)
 
     if noverlap > nwindow:
         raise ValueError(f'Size cannot be larger than {noverlap} > {nwindow}')
 
     if noverlap == nwindow:
         noverlap -= 1  # Maximal overlap!
-        wrn.warn('Specified overlap equals window size. Adjusting to '
-                 f'maximal {noverlap=}')
+        warn('Specified overlap equals window size. Adjusting to '
+             f'maximal {noverlap=}')
 
     # negative overlap works like negative indexing! :)
     if noverlap < 0:
@@ -194,31 +155,36 @@ def resolve_overlap(nwindow, noverlap, dt=None):
     return noverlap
 
 
-def resolve_padding(args, nwindow, dt):
+def resolve_padding(nwindow, dt, args):
     if args is None:
         return nwindow, None, {}
 
     if isinstance(args, tuple):
-        size, method, *kws = args
-        assert method in PADDING
-
-        size = convert_size(nwindow, size, dt, 'pad')
-
-        if size < nwindow:
-            raise ValueError(
-                f'Total padded segment length {size} cannot be smaller than '
-                f'nwindow {nwindow}'
-            )
-
-        kws, = kws or [{}]
-        return size, method, kws
-
+        return _resolve_padding(args, nwindow, dt)
+    
     raise ValueError(txw.dedent(
-        '''Padding needs to be a tuple containing
-            1) desired signal size (int)
+        '''Padding needs to be a tuple containing:
+            1) desired size of output signal (int)
             2) padding method (str)
-            3) optional arguments for method (dict)
+            3) optional keyword arguments for method (dict)
         '''))
+
+
+def _resolve_padding(nwindow, dt, args):
+    
+    size, method, *kws = args
+    assert method in PADDING
+
+    size = windowing.resolve_size(size, nwindow, dt)
+
+    if size < nwindow:
+        raise ValueError(
+            f'Total padded segment length {size} cannot be smaller than '
+            f'nwindow {nwindow}'
+        )
+
+    kws, = kws or [{}]
+    return size, method, kws
 
 
 # def prepare_signal(signal, t, dt, gaps):
@@ -233,8 +199,6 @@ def resolve_padding(args, nwindow, dt):
 #         t, signal = fill_gaps(t, signal, dt, fillmethod, option)
 
 #     return t, signal
-
-
 
 
 class Normalizer:
@@ -363,7 +327,7 @@ class FFTBase:
 
     @classmethod
     def _check_input(cls, signal, t, dt):
-        emit = wrn.warn
+        emit = warn
         if np.ma.is_masked(signal):
             msg = ('Your signal contains masked data points. FFT-based spectral'
                    ' estimation methods are not appropriate for time series '
@@ -415,7 +379,7 @@ class FFTBase:
         if power_unit:
             power_unit = power_unit.join('()')
         density = name and (('density' in name) or (name == 'pds'))
-        density = 'density ' * density
+        density = 'density ' * bool(density)
         return f'Power {density}{power_unit}'
 
     def get_xlabel(self):
@@ -652,8 +616,6 @@ class Spectrogram(Periodogram):
         # self.power = periodogram(self.segments, normalize, dt)
         # self.normed = normalize
 
-    
-    
     @property
     def fRayleigh(self):
         return 1. / (self.nwindow * self.dt)

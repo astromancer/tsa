@@ -1,39 +1,86 @@
+# std
+import numbers
+import contextlib
+import functools as ftl
+
+# third-party
 import numpy as np
 import scipy as sp
 import scipy.signal
-import functools as ftl
+
+# local
+from recipes.string import Percentage
 
 
-def get_window(window, N=None):
+def resolve_size(size, n=None, dt=None):
+
+    # overlap specified by percentage string eg: 99% or timescale eg: 60s
+    if isinstance(size, str):
+        assert n, 'Array size `n` required if `size` given as percentage (str).'
+
+        # percentage
+        if size.endswith('%'):
+            return round(Percentage(size).of(n))
+
+        return _size_from_unit_string(size, dt)
+
+    if isinstance(size, float):
+        if size < 1:
+            assert n, 'Array size `n` required if `size` given as percentage (float).'
+            return round(size * n)
+
+        raise ValueError('Providing a float value for `size` is only valid if '
+                         'that value is smaller than 1, in which case it is '
+                         'interpreted as a fraction of the array size.')
+
+    if isinstance(size, numbers.Integral):
+        return size
+
+    raise ValueError(
+        f'Invalid size: {size!r}. This should be an integer, or a percentage '
+        'of the array size as a string eg: "12.4%", or equivalently a float < 1'
+        ' eg: 0.124, in which case the array size should be supplied. '
+        'Finally, you may also provide the size in units of seconds eg: '
+        '"30s", in whic case, the timestep `dt`, should also be provided.'
+    )
+
+
+def _size_from_unit_string(size, dt):
+    if size.endswith('s'):
+        return round(float(size.strip('s')) / dt)
+
+    raise NotImplementedError
+
+
+def get_window(window, n=None):
     """
-    Return window values of window described by str `window' and length `N'
+    Return window values of window described by str `window' and length `n'.
     ...
     """
     if isinstance(window, (str, tuple)):
-        if N is None:
-            raise ValueError('Please specify window size N')
-        return sp.signal.get_window(window, N)
+        if n is None:
+            raise ValueError('Please specify window size `n`')
+        return sp.signal.get_window(window, n)
 
     # if window values are passed explicitly as a sequence of values
     if np.iterable(window):
         # if N given, assert that it matches the window length
-        if N is not None:
-            assert len(window) == N, ('length {} of given window does not match'
-                                      'array length {}').format(len(window), N)
+        if n and len(window) != n:
+            raise ValueError(
+                f'Length {len(window)} of given window does not match '
+                f'array length {n}.'
+            )
         return window
-    
-    raise ValueError('Cannot make window from %s' % window)
+
+    raise ValueError(f'Cannot make window from object: {window!r}.')
 
 
 def windowed(a, window=None):
     """get window values + apply"""
-    if window is None:
-        return a
-
-    return a * get_window(window, a.shape[-1])
+    return a if (window is None) else a * get_window(window, a.shape[-1])
 
 
-def show_all_windows(cmap='gist_rainbow'):
+def show_all_windows(cmap='gist_rainbow', size=1024):
     """
     plot all the spectral windows defined in scipy.signal (at least those that
     don't want a parameter argument.)
@@ -45,12 +92,10 @@ def show_all_windows(cmap='gist_rainbow'):
     windows = scipy.signal.windows.__all__
     ax.set_color_cycle(cm(np.linspace(0, 1, len(windows))))
 
-    winge = ftl.partial(scipy.signal.get_window, Nx=1024)
+    winge = ftl.partial(scipy.signal.get_window, Nx=size)
     for w in windows:
-        try:
+        with contextlib.suppress(Exception):
             plt.plot(winge(w), label=w)
-        except:
-            pass
-        
+
     plt.legend()
     plt.show()

@@ -2,13 +2,19 @@
 Time series objects
 """
 
+# std
 import numbers
 import operator
 
+# third-party
 import numpy as np
-# import matplotlib.pyplot as plt
 
-from .plotting import TimeSeriesPlot, DEFAULTS
+# local
+from recipes import api
+from recipes.functionals import echo
+
+# relative
+from .plotting import CONFIG, TimeSeriesPlot
 
 
 # import uncertainties.unumpy as unp  # linear uncertainty propagation
@@ -26,8 +32,9 @@ from .plotting import TimeSeriesPlot, DEFAULTS
 
 class TimeSeries:
     """
-    A basic univariate time series with optional uncertainties
+    A basic univariate time series with optional uncertainties.
     """
+
     # This class ties together the functionality of various libraries for
     # analysing time series data.
 
@@ -60,23 +67,30 @@ class TimeSeries:
     #  Not supported
     #  - units.  Make sure you use compatible units when doing arithmetic
 
+    # @classmethod
+    # def fromfile(cls, filename):
+
     @staticmethod
-    def _parse_init_args(t_or_x, x=None, u=None, **kws):
+    def _parse_init_args(t_or_x, x=None, u=None):
         # signals only
         if x is None:
             x = t_or_x
-            if isinstance(x, TimeSeries):
-                return x.t, x.x, x.u
-
-            return None, x, u
+            return (x.t, x.x, x.u) if isinstance(x, TimeSeries) else (None, x, u)
 
         # times & signals given
         return t_or_x, x, u
 
-    # def __new__(cls, *args, **kws):
-    #     t, x, u = cls._parse_init_args(*args, **kws)
-    #     obj = super().__new__()
-    #     return TimeSeries.__init__(obj, t, x, u, **kws)
+    def __new__(cls, *args, **kws):
+        t, x, u = cls._parse_init_args(*args)
+
+        if np.squeeze(x).ndim > 1:
+            obj = super().__new__(MultiVariateTimeSeries)
+            # init will not run automatically since this returns an object of a
+            # different class
+            obj.__init__(t, x, u)
+            return obj
+
+        return super().__new__(cls)
 
     def __init__(self, *args, **kws):
         """
@@ -87,7 +101,7 @@ class TimeSeries:
         >>> TimeSeries(np.random.randn(100))
 
         """
-        t, x, u = self._parse_init_args(*args, **kws)
+        t, x, u = self._parse_init_args(*args)
 
         # times
         self._t = self._x = self._u = None
@@ -150,32 +164,35 @@ class TimeSeries:
         n, m = len(self), len(vector)
         if m != n:
             raise ValueError(
-                f'Unequal number of points between data ({n=}) and {name} '
-                f'({m=}) vectors.'
+                f'Unequal number of points between data `x` ({n=}) and {name} `'
+                f'{name[0]}` ({m=}) vectors.'
             )
 
     @property
     def n(self):
-        """Number of data points"""
+        """Number of data points."""
         return len(self)
+
+    @property
+    def m(self):
+        """Number of variates (time series)."""
+        return 1 if self.x.ndim == 1 else self.x.shape[1]
 
     # def fold(self, eph):
 
-    # @property
-    # def data(self):
-    #     return unp.nominal_values(self._x)
-    #     # always returns masked array with full mask. probably not that
-    #     # efficient
-    #
-    # @property
-    # def std(self):
-    #     return unp.std_devs(self._x)
-    #     # always returns masked array with full mask. probably not that
-    #     # efficient
+    # ------------------------------------------------------------------------ #
 
-    # def __repr__(self):
-    #     ''
+    def __repr__(self):
+        return f'{type(self).__name__}(n={self.n:d})'  # .replace(',', ' ')
 
+    def __getitem__(self, key):
+        data = self.x[key]
+        kls = TimeSeries if len(data) else echo
+        return kls(None if self.t is None else self.t[key],
+                   data,
+                   None if self.u is None else self.u[key])
+
+    # ------------------------------------------------------------------------ #
     def __len__(self):
         return len(self._x)
 
@@ -204,18 +221,17 @@ class TimeSeries:
                                  f' different sizes not permitted')
 
             # TODO: propagate uncertainties!
-            return self.__class__(self.t, op(self.x, other.x))
+            return self.__class__(self.t, op(self.x, other.x), self.u)
 
         # arithmetic with complex numbers not supported
-        if isinstance(other, numbers.Complex) and \
-                not isinstance(other, numbers.Real):
+        if isinstance(other, numbers.Complex) and not isinstance(other, numbers.Real):
             raise TypeError('Arithmetic with complex numbers not currently '
                             'supported.')
             # all other number types should be OK
 
         # array-like (any object that can create an array / any duck-type array)
         other = np.asanyarray(other)
-        return self.__class__(self.t, op(self._x, other))
+        return self.__class__(self.t, op(self._x, other), self.u)
 
     def __add__(self, other):
         return self._arithmetic(other, operator.add)
@@ -294,7 +310,24 @@ class TimeSeries:
     # object.__floor__(self)
     # object.__ceil__(self)
 
-    def plot(self, ax=None, title='', hist=(), plims=DEFAULTS.plims, **kws):
+    # ------------------------------------------------------------------------ #
+    def append(self, ts):
+
+        if isinstance(ts, tuple):
+            ts = type(self)(*ts)
+
+        self.x = np.hstack([self.x, ts.x])
+
+        if self.t is not None:
+            self.t = np.hstack([self.t, ts.t])
+
+        if self.u is not None:
+            self.u = np.hstack([self.u, ts.u])
+
+    # ------------------------------------------------------------------------ #
+    @api.synonyms({'(histogram)|(marginal)': 'hist'})
+    def plot(self, ax=None, title='', hist=(), plims=CONFIG.plims, **kws):
+        #
         tsp = TimeSeriesPlot(ax, title, hist, plims)
         tsp.plot(*self, **kws)
         tsp.ax.set(xlabel='Time (s)',
@@ -316,8 +349,22 @@ class TimeSeries:
                            pad, split, normalize)
 
 
-# class MultiVariateTimeSeries(TimeSeries):
-#     # support for simultaneous multivariate data
+class MultiVariateTimeSeries(TimeSeries):
+    # support for simultaneous multivariate data
 
-#     # def decorrelate()
-#     pass
+    # def decorrelate()
+
+    def __repr__(self):
+        return f'{type(self).__name__}(n={self.n:d}, m={self.m:d})'  # .replace(',', ' ')
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            return super().__getitem__(key)
+
+        # select variate
+        key, m = key
+        data = self.x[key, m]
+        kls = TimeSeries if len(data) else echo
+        return kls(None if self.t is None else self.t[key],
+                   data,
+                   None if self.u is None else self.u[key, m])
