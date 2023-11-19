@@ -15,7 +15,7 @@ from distutils import debug
 
 # third-party
 from setuptools.command.build_py import build_py
-from setuptools import Command, setup, find_packages
+from setuptools import Command, find_packages, setup
 
 
 debug.DEBUG = True
