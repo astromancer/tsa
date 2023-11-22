@@ -1,3 +1,4 @@
+
 """
 Universal build script for python project git repos.
 """
@@ -8,6 +9,7 @@ import re
 import sys
 import glob
 import site
+import math
 import fnmatch
 import subprocess as sub
 from pathlib import Path
@@ -18,6 +20,7 @@ from setuptools.command.build_py import build_py
 from setuptools import Command, find_packages, setup
 
 
+# ---------------------------------------------------------------------------- #
 debug.DEBUG = True
 
 # allow editable user installs
@@ -29,8 +32,18 @@ status = sub.getoutput('git status --porcelain')
 untracked = re.findall(r'\?\? (.+)', status)
 
 
+# ---------------------------------------------------------------------------- #
+# Source: https://github.com/astromancer/recipes/blob/main/src/recipes/io/
+
+IGNORE_IMPLICIT = ('.git', )
+
+
 class GitIgnore:
-    """exclude gitignored files from build archive"""
+    """
+    Class to read `.gitignore` patterns and filter source trees.
+    """
+
+    __slots__ = ('root', 'names', 'patterns')
 
     def __init__(self, path='.gitignore'):
         self.names = self.patterns = ()
@@ -39,19 +52,56 @@ class GitIgnore:
             return
 
         # read .gitignore patterns
-        lines = path.read_text().splitlines()
-        lines = (_.strip().rstrip('/') for _ in lines if not _.startswith('#'))
+        lines = (line.strip(' /')
+                 for line in path.read_text().splitlines()
+                 if not line.startswith('#'))
+
         items = names, patterns = [], []
         for line in filter(None, lines):
             items[glob.has_magic(line)].append(line)
 
-        self.names = tuple(names)
+        self.root = path.parent
+        self.names = (*IGNORE_IMPLICIT, *names)
         self.patterns = tuple(patterns)
 
     def match(self, filename):
+        path = Path(filename).relative_to(self.root)
+        filename = str(path)
         for pattern in self.patterns:
             if fnmatch.fnmatchcase(filename, pattern):
                 return True
+
+        return filename.endswith(self.names)
+
+    def iter(self, folder=None, depth=any, _level=0):
+        depth = math.inf if depth is any else depth
+        folder = folder or self.root
+
+        _level += 1
+        if _level > depth:
+            return
+
+        for path in folder.iterdir():
+            if self.match(path):
+                continue
+
+            if path.is_dir():
+                yield from self.iter(path, depth, _level)
+                continue
+
+            yield path
+
+    def match(self, filename):
+        path = Path(filename)
+        rpath = path.relative_to(self.root)
+        filename = str(rpath)
+        for pattern in self.patterns:
+            # folder pattern
+            # if folder in rpath.parents:
+
+            if fnmatch.fnmatchcase(filename, pattern):
+                return True
+
         return filename.endswith(self.names)
 
 
@@ -66,7 +116,7 @@ class Builder(build_py):
 
         # package, module, files
         info = super().find_package_modules(package, package_dir)
-        
+
         for package, module, path in info:
             # filter files
             if path in untracked:
@@ -76,10 +126,9 @@ class Builder(build_py):
             if gitignore.match(path):
                 self.debug_print(f'(git)ignoring: {path}')
                 continue
-            
-            self.debug_print(f'FOUND: {package=}: {module=} {path=}')
+
+            self.debug_print(f'FOUND: {package = }: {module = } {path = }')
             yield package, module, path
-            
 
 
 class CleanCommand(Command):
@@ -96,6 +145,7 @@ class CleanCommand(Command):
         os.system('rm -vrf ./build ./dist ./*.pyc ./*.tgz ./src/*.egg-info')
 
 
+# ---------------------------------------------------------------------------- #
 gitignore = GitIgnore()
 
 setup(
@@ -105,6 +155,6 @@ setup(
     exclude_package_data={'': [*gitignore.patterns, *gitignore.names]},
     cmdclass={'build_py': Builder,
               'clean': CleanCommand}
-    # extras_require = dict(reST = ["docutils>=0.3", "reSTedit"])
-    # test_suite='pytest',
+    # extras_require = dict(reST = ["docutils> = 0.3", "reSTedit"])
+    # test_suite = 'pytest',
 )
