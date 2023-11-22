@@ -1,3 +1,4 @@
+# !/usr/bin/env python
 
 """
 Universal build script for python project git repos.
