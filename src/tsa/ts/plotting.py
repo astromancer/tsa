@@ -484,7 +484,7 @@ class TimeSeriesPlot:
         # left, bottom, right, top = [0.025, 0.01, 0.97, .98]
         # fig.tight_layout(rect=rect)
         # return fig, ax
-        
+
     def __iter__(self):
         yield self.fig
         yield self.ax
@@ -661,9 +661,9 @@ class TimeSeriesPlot:
 
         # plot masked points
         if ebar := self.ax.plot(t[signal.mask], signal[signal.mask].data,
-                                    color=color, marker=marker,
-                                    ls='None',  label='_nolegend_',
-                                    alpha=0.7):
+                                color=color, marker=marker,
+                                ls='None',  label='_nolegend_',
+                                alpha=0.7):
             self.art.append(ebar)
             self._linked.append((last, ebar))
 
@@ -887,16 +887,17 @@ def plot_folded_lc(ax, phase, stats, p, twice=True, sigma=1., orientation='h',
 # def axes_utc_
 
 
-def make_twin_relative(ax, offset=0, scale=1, tick_label_angle=0, date=None):
+def make_twin_relative(ax, offset=0, scale=1, tick_label_angle=0, **kws):
+    #  date=None, 
 
     # make transform
     axp = ax.twin(Affine2D().translate(-offset, 0).scale(scale).inverted())
     # == Affine2D().scale(1/scale).translate(offset, 0)
 
     # make tick locs / format
-    axp.xaxis.set_major_locator(ticker.MultipleLocator(15 * 60))
+    axp.xaxis.set_major_locator(ticker.MultipleLocator(30 * 60))
     axp.xaxis.set_major_formatter(
-        SexagesimalFormatter(precision='m0', unicode=True)
+        SexagesimalFormatter(**{'precision': 'm0', 'unicode': True, **kws})
     )
 
     for axx in (ax, axp):
@@ -910,7 +911,8 @@ def make_twin_relative(ax, offset=0, scale=1, tick_label_angle=0, date=None):
 
     axp.tick_params('x', which='both', top=True, bottom=False,
                     labeltop=True, labelbottom=False)
-    axp.tick_params('y', which='both', right=True, labelright=True)
+    axp.tick_params('y', which='both', left=False,
+                    right=True, labelright=True)
 
     # if date is not None:
 #
@@ -922,7 +924,6 @@ def make_twin_relative(ax, offset=0, scale=1, tick_label_angle=0, date=None):
 
 
 def make_twin_phased(ax, period=1, phoff=0, tick_label_angle=0):
-
     return make_twin_relative(ax, -phoff, 1 / period / 86400, tick_label_angle)
 
 

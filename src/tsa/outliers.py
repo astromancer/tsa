@@ -200,7 +200,7 @@ def detect_window(data, nwindow, noverlap,
 
     prob = defaultdict(int)
     for i, section in enumerate(folded := fold.fold(data, nwindow, noverlap)):
-        logger.debug('Section {}/{}', i, len(folded))
+        logger.debug('Section {}/{}.', i, len(folded))
         if np.ma.is_masked(section):
             section = section[~section.mask]
 
