@@ -49,6 +49,8 @@ class GitIgnore:
     def __init__(self, path='.gitignore'):
         self.names = self.patterns = ()
         path = Path(path)
+        self.root = path.parent
+
         if not path.exists():
             return
 
@@ -61,7 +63,6 @@ class GitIgnore:
         for line in filter(None, lines):
             items[glob.has_magic(line)].append(line)
 
-        self.root = path.parent
         self.names = (*IGNORE_IMPLICIT, *names)
         self.patterns = tuple(patterns)
 
@@ -97,9 +98,6 @@ class GitIgnore:
         rpath = path.relative_to(self.root)
         filename = str(rpath)
         for pattern in self.patterns:
-            # folder pattern
-            # if folder in rpath.parents:
-
             if fnmatch.fnmatchcase(filename, pattern):
                 return True
 
