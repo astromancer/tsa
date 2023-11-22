@@ -33,7 +33,7 @@ untracked = re.findall(r'\?\? (.+)', status)
 
 
 # ---------------------------------------------------------------------------- #
-# Source: https://github.com/astromancer/recipes/blob/main/src/recipes/io/
+# Source: https://github.com/astromancer/recipes/blob/main/src/recipes/io/gitignore.py
 
 IGNORE_IMPLICIT = ('.git', )
 
