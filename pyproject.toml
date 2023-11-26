@@ -4,9 +4,7 @@ description = "{description}"
 authors = [
     {name = "Hannes Breytenbach", email = "hannes@saao.ac.za"}
 ]
-dynamic = ["version", "readme"]
 license = {text = "MIT"}
-requires-python = ">={py_min_version}"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -15,13 +13,15 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux"
 ]
+dynamic = ["version", "readme"]
+requires-python = ">={py_min_version}"
+dependencies = [
+
+]
 
 [project.urls]
 "Homepage" = "{url}"
 "Bug Tracker" = "{url}/issues"
-
-[project.optional-dependencies]
-tests = ["pytest"]
 
 [build-system]
 build-backend = "setuptools.build_meta"
@@ -37,8 +37,10 @@ requires = [
 where = ["src"]
 
 [tool.setuptools.dynamic]
-readme = {file = "README.md", content-type = "text/markdown"}
 version = {attr = "{name}._version.version"}
+readme = {file = "README.md", content-type = "text/markdown"}
+optional-dependencies.test = { file = ["requirements-dev.txt"] }
+
 
 [tool.setuptools_scm]
 write_to = "src/{name}/_version.py"
