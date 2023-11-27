@@ -5,9 +5,11 @@ Various de-trending (low-pass filtering) methods.
 # TODO: change name of this
 # look at scipy.sigtools.detrend
 
-from .smoothing import smoother
-
+# third-party
 import numpy as np
+
+# relative
+from .smoothing import smoother
 
 
 ORDER_NAMES = ['mean', 'linear', 'quadratic', 'cubic', 'quartic', 'quintic']

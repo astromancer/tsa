@@ -16,10 +16,11 @@ import pytest
 import numpy as np
 import matplotlib.pyplot as plt
 
-
+# local
 from tsa.ts import TimeSeries
 from tsa.spectral import Periodogram
 from tsa.ts.generate import Harmonic
+
 
 # ---------------------------------------------------------------------------- #
 # project folder
@@ -27,11 +28,8 @@ SRC = Path(__file__).parent.parent
 
 RGX_EXAMPLE = re.compile(r'(?s)\n\s*```python\s+(.+?)```')
 
-HERE = Path()
-README = HERE.parent / 'README.md'
 
-
-def get_readme_examples(filename=README):
+def get_readme_examples(filename=SRC / 'README.md'):
     # sourcery skip: hoist-statement-from-loop
     readme = Path(filename).read_text()
     for match in RGX_EXAMPLE.finditer(readme):

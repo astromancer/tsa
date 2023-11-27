@@ -4,7 +4,7 @@ import numpy as np
 
 # local
 from tsa.ts import TimeSeries
-from recipes.testing import Expected, mock, PASS, Throws
+from recipes.testing import PASS, Expected, Throws, mock
 
 
 # pylint: disable=missing-function-docstring
