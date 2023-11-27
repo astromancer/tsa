@@ -228,7 +228,7 @@ class TimeFrequencyBase:
         # alpha[:,narrow_gap_inds+1] = 0.25
 
         image.set_data(self.spec.tmid, frq, pwr.T)
-        self.axes.map.images.append(image)
+        self.axes.map.add_image(image)
         # self.axes.map.set_xlim( t[0],t[-1] )
         # self.axes.map.set_ylim( frq[0],frq[-1] )
 
