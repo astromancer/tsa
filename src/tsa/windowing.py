@@ -12,6 +12,41 @@ import scipy.signal
 from recipes.string import Percentage
 
 
+# ---------------------------------------------------------------------------- #
+def windowed(a, window=None):
+    """get window values + apply"""
+    return a if (window is None) else a * get_window(window, a.shape[-1])
+
+
+def get_window(window, n=None):
+    """
+    Return window values of window described by str `window' and length `n'.
+    ...
+    """
+    if isinstance(window, (str, tuple)):
+        if n is None:
+            raise ValueError('Please specify window size `n`.')
+
+        if window == 'hanning':
+            window = 'hann'
+
+        return sp.signal.get_window(window, n)
+
+    # if window values are passed explicitly as a sequence of values
+    if np.iterable(window):
+        # if N given, assert that it matches the window length
+        if n and len(window) != n:
+            raise ValueError(
+                f'Length {len(window)} of given window does not match '
+                f'array length {n}.'
+            )
+        return window
+
+    raise ValueError(f'Cannot make window from object: {window!r}.')
+
+
+# ---------------------------------------------------------------------------- #
+
 def resolve_size(size, n=None, dt=None):
 
     # overlap specified by percentage string eg: 99% or timescale eg: 60s
@@ -52,33 +87,7 @@ def _size_from_unit_string(size, dt):
     raise NotImplementedError
 
 
-def get_window(window, n=None):
-    """
-    Return window values of window described by str `window' and length `n'.
-    ...
-    """
-    if isinstance(window, (str, tuple)):
-        if n is None:
-            raise ValueError('Please specify window size `n`')
-        return sp.signal.get_window(window, n)
-
-    # if window values are passed explicitly as a sequence of values
-    if np.iterable(window):
-        # if N given, assert that it matches the window length
-        if n and len(window) != n:
-            raise ValueError(
-                f'Length {len(window)} of given window does not match '
-                f'array length {n}.'
-            )
-        return window
-
-    raise ValueError(f'Cannot make window from object: {window!r}.')
-
-
-def windowed(a, window=None):
-    """get window values + apply"""
-    return a if (window is None) else a * get_window(window, a.shape[-1])
-
+# ---------------------------------------------------------------------------- #
 
 def show_all_windows(cmap='gist_rainbow', size=1024):
     """
