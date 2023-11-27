@@ -40,6 +40,8 @@ def _git_status():
     if status.startswith('fatal: not a git repository'):
         raise RuntimeError(status)
 
+    return status
+
 
 UNTRACKED = re.findall(r'\?\? (.+)', _git_status())
 IGNORE_IMPLICIT = ('.git', )
