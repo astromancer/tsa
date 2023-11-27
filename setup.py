@@ -34,10 +34,10 @@ site.ENABLE_USER_SITE = ('--user' in sys.argv[1:])
 # Source: https://github.com/astromancer/recipes/blob/main/src/recipes/io/gitignore.py
 
 
-def _git_status():
+def _git_status(raises=False):
     # check if we are in a repo
     status = sub.getoutput('git status --porcelain')
-    if status.startswith('fatal: not a git repository'):
+    if raises and status.startswith('fatal: not a git repository'):
         raise RuntimeError(status)
 
     return status
