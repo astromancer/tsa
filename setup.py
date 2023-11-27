@@ -28,14 +28,20 @@ debug.DEBUG = True
 # see: https://github.com/pypa/pip/issues/7953
 site.ENABLE_USER_SITE = ('--user' in sys.argv[1:])
 
-# check if we are in a repo
-status = sub.getoutput('git status --porcelain')
-untracked = re.findall(r'\?\? (.+)', status)
 
-
+# Git ignore
 # ---------------------------------------------------------------------------- #
 # Source: https://github.com/astromancer/recipes/blob/main/src/recipes/io/gitignore.py
 
+
+def _git_status():
+    # check if we are in a repo
+    status = sub.getoutput('git status --porcelain')
+    if status.startswith('fatal: not a git repository'):
+        raise RuntimeError(status)
+
+
+UNTRACKED = re.findall(r'\?\? (.+)', _git_status())
 IGNORE_IMPLICIT = ('.git', )
 
 
@@ -104,6 +110,9 @@ class GitIgnore:
         return filename.endswith(self.names)
 
 
+# Setuptools
+# ---------------------------------------------------------------------------- #
+
 class Builder(build_py):
     # need this to exclude ignored files from the build archive
 
@@ -118,20 +127,21 @@ class Builder(build_py):
 
         for package, module, path in info:
             # filter files
-            if path in untracked:
-                self.debug_print(f'ignoring untracked: {path}')
+            if path in UNTRACKED:
+                self.debug_print(f'Ignoring untracked: {path}.')
                 continue
 
             if gitignore.match(path):
-                self.debug_print(f'(git)ignoring: {path}')
+                self.debug_print(f'(git)ignoring: {path}.')
                 continue
 
-            self.debug_print(f'FOUND: {package = }: {module = } {path = }')
+            self.debug_print(f'Found: {package = }: {module = } {path = }')
             yield package, module, path
 
 
 class CleanCommand(Command):
     """Custom clean command to tidy up the project root."""
+
     user_options = []
 
     def initialize_options(self):
@@ -144,6 +154,7 @@ class CleanCommand(Command):
         os.system('rm -vrf ./build ./dist ./*.pyc ./*.tgz ./src/*.egg-info')
 
 
+# Main
 # ---------------------------------------------------------------------------- #
 gitignore = GitIgnore()
 
