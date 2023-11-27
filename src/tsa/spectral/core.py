@@ -160,8 +160,8 @@ def resolve_padding(nwindow, dt, args):
         return nwindow, None, {}
 
     if isinstance(args, tuple):
-        return _resolve_padding(args, nwindow, dt)
-    
+        return _resolve_padding(nwindow, dt, args)
+
     raise ValueError(txw.dedent(
         '''Padding needs to be a tuple containing:
             1) desired size of output signal (int)
@@ -171,7 +171,7 @@ def resolve_padding(nwindow, dt, args):
 
 
 def _resolve_padding(nwindow, dt, args):
-    
+
     size, method, *kws = args
     assert method in PADDING
 
@@ -399,7 +399,7 @@ class Periodogram(FFTBase):
         FFTBase.__init__(self, t_or_x, signal, normalize, dt=dt)
 
         n = len(self.signal)
-        self.padding = self.npadded, *_ = resolve_padding(pad, n, self.dt)
+        self.padding = self.npadded, *_ = resolve_padding(n, self.dt, pad)
 
         # calculate periodograms
         self.power = self.compute(self.signal, detrend, pad, window)
@@ -589,8 +589,7 @@ class Spectrogram(Periodogram):
         n = len(self.signal)
         self.nwindow = nwindow = resolve_nwindow(nwindow, split, n, dt)
         self.noverlap = noverlap = resolve_overlap(nwindow, noverlap, dt)
-        self.padding = self.npadded, *_ = \
-            resolve_padding(pad, nwindow, self.dt)
+        self.padding = self.npadded, *_ = resolve_padding(nwindow, self.dt, pad)
 
         # fold
         # self.t_seg, segments = get_segments(
