@@ -562,7 +562,8 @@ class TimeSeriesPlot:
             # print(np.shape(t), np.shape(y), np.shape(σy), np.shape(σt))
             # if yo:
             #     y = y + yo
-            self.errorbar(t, y, σy, σt, label, show_masked, show_hist, False, styles)
+            self.errorbar(t, y, σy, σt, label, show_masked,
+                          show_hist, False, styles)
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # add text labels
@@ -888,7 +889,7 @@ def plot_folded_lc(ax, phase, stats, p, twice=True, sigma=1., orientation='h',
 
 
 def make_twin_relative(ax, offset=0, scale=1, tick_label_angle=0, **kws):
-    #  date=None, 
+    #  date=None,
 
     # make transform
     axp = ax.twin(Affine2D().translate(-offset, 0).scale(scale).inverted())

@@ -189,7 +189,7 @@ class TimeFrequencyBase:
         return fig, axes
 
     def plot(self, cmap, ts_props=None, pg_props=None):
-        
+
         spec = self.spec
         frq, pwr = spec.frq, spec.power
         valid = frq > spec.fRayleigh
@@ -220,7 +220,7 @@ class TimeFrequencyBase:
         # detect_gaps
         # narrow_gap_inds = Spectral.detect_gaps(t, self.KCT*128/3600, 2)
         # narrow_gap_inds = narrow_gap_inds
-        ##print( narrow_gap_inds )
+        # print( narrow_gap_inds )
 
         # fade gaps
         # alpha = data[...,-1]
@@ -269,7 +269,8 @@ class TimeFrequencyBase:
         # TODO: MOVE TO SUBCLASS ?
         self.axes.map.callbacks.connect('xlim_changed', self.save_background)
         self.axes.map.callbacks.connect('ylim_changed', self.save_background)
-        self.axes.map.callbacks.connect('ylim_changed', self._set_parasite_ylim)
+        self.axes.map.callbacks.connect(
+            'ylim_changed', self._set_parasite_ylim)
 
         return art
 
@@ -284,7 +285,7 @@ class TimeFrequencyBase:
                 smoother(p, smoothing), frq, ls.get(q, ':'),
                 **(pg_props or {})
             )
-        
+
         if clim is None:
             clim = (None, None)
         ylim = frq[[0, -1]]
@@ -303,7 +304,7 @@ class TimeFrequencyBase:
         self.axes.spec.callbacks.connect('xlim_changed', self._set_clim)
         self.axes.spec.callbacks.connect(
             'ylim_changed', self._set_parasite_ylim)
-        
+
         return art
 
     def save_background(self, _ignored=None):

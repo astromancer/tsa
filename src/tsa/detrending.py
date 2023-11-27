@@ -103,7 +103,7 @@ def detrend(x, method=None, n=None, t=None, **kws):
         n = NAMED_ORDERS.get(method)
         method = 'poly'
 
-    if  method not in ('poly', 'smooth'):  # TODO: more methods
+    if method not in ('poly', 'smooth'):  # TODO: more methods
         raise ValueError('Unknown method: {}'.format(method))
 
     if method == 'poly':
@@ -124,5 +124,3 @@ def detrend(x, method=None, n=None, t=None, **kws):
         from . import fold
         binsize = kws.get('binsize', 100)
         rbn = fold.rebin(x, binsize)
-
-

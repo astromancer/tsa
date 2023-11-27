@@ -355,7 +355,8 @@ class MultiVariateTimeSeries(TimeSeries):
     # def decorrelate()
 
     def __repr__(self):
-        return f'{type(self).__name__}(n={self.n:d}, m={self.m:d})'  # .replace(',', ' ')
+        # .replace(',', ' ')
+        return f'{type(self).__name__}(n={self.n:d}, m={self.m:d})'
 
     def __getitem__(self, key):
         if not isinstance(key, tuple):

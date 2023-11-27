@@ -210,7 +210,8 @@ def detect_window(data, nwindow, noverlap,
 
         if len(widx):
             didx = i * step + np.array(widx)  # indices relative to data
-            didx = didx[didx < n]  # remove indices that exceed array dimensions
+            # remove indices that exceed array dimensions
+            didx = didx[didx < n]
             for ii, jj in zip(widx, didx):
                 prob[jj] += weights[ii] / noc[jj]
                 # mean probability that points where flagged as outliers

@@ -53,7 +53,7 @@ def summary(t, rtol=1e-5, atol=1e-8):
     if np.allclose(deltas, deltas[0], rtol, atol):
         # constant time steps
         return deltas[0], deltas, ''
-    
+
     # non-constant time steps!
     unqdt = np.unique(deltas)
     mode = stats.mode(deltas)
@@ -177,7 +177,7 @@ def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True,
             if mode == 'constant':
                 val = option  # option gives constant value to use
             if mode == 'edge':
-                val = y[i + 1] if option == 'upper' else y[i]  
+                val = y[i + 1] if option == 'upper' else y[i]
                 # use upper of lower edge value
 
             if mode == 'median':

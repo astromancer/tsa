@@ -12,7 +12,6 @@ from obstools.psf.model import Model
 from .spectral import Spectral, normaliser
 
 
-
 def rescale(data, interval=(-1, 1)):
     """Linearly rescale data to fall within given interval"""
     data = np.asarray(data)

@@ -3,18 +3,28 @@ Implements significance tests for periodic signals in presence of red
 noise form Vaughan 2005A&A...431..391V
 """
 
-# import math
+# std
+import tempfile
 import warnings
 import operator
 import functools as ftl
 import itertools as itt
 import multiprocessing as mp
 
+# third-party
 import numpy as np
-from scipy.integrate import quad, dblquad
-from scipy.optimize import brentq
+import matplotlib.pyplot as plt
+from matplotlib.colors import colorConverter
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+from scipy.integrate import dblquad, quad
+from scipy.optimize import brentq, leastsq
 
-from recipes.parallel.synced import SyncedArray
+# local
+from obstools.modelling.core import Model
+
+# relative
+from .spectral import Spectral
+
 
 # NOTE: can be optimized more for better performance?
 #  powerlaw variance is symmetrical about 1 in log frequency
@@ -153,9 +163,6 @@ def _bulk_compute(frq, Z, grid=True, **kws):
     return np.array(_shared)
 
 
-import tempfile
-
-
 def _init_shared_memory(Z, Sj2, grid):
     global _shared
 
@@ -277,12 +284,6 @@ def test_memoize(frq, percent=99.9):
     else:
         n = len(frq)
         c = pow(frac, 1 / n)
-
-
-from scipy.optimize import leastsq
-
-from .spectral import Spectral
-from obstools.modelling.core import Model
 
 
 class Linear(Model):
@@ -418,11 +419,6 @@ class PowerLawSpec(Spectral):
 
 #         return self.power[i] - powerlaw(N, alpha, self.frq[None])
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from matplotlib.colors import colorConverter
-
 
 def fancy_3D(Frq, Z, P, log=False, gamma_e=None):
     def shade3D(ax, k, ge=None, color='g', alpha=0.4):
@@ -551,7 +547,6 @@ if __name__ == '__main__':
     # symbol to use for Probability
     Psym = r'\mathrm{\mathbb{P}}'
 
-
     @timer_dev
     def test_sequential(Z, Sj2):
         igrl = np.empty((len(Z),) + Sj2.shape)
@@ -559,24 +554,20 @@ if __name__ == '__main__':
             igrl[i, j] = pdf_gamma(z, sj2)
         return igrl
 
-
     @timer_dev
     def test_mp(Z, Sj2):
         return pdf_gamma_bulk(Z, Sj2)
-
 
     @timer_dev
     def test_cdf(Sj2):
         cdf_inf = [cdf_gamma(np.inf, sj2) for sj2 in Sj2]
         return np.allclose(cdf_inf, 1)
 
-
     def plot_pgram_var(frq, Sj2):
         # plot periodogram variance (including model uncertainty) with freq
         fig, ax = plt.subplots()
         ax.loglog(frq, Sj2)
         ax.grid()
-
 
     def plot_integrand(frq):
         # plot integrand for a bunch of freq
@@ -587,7 +578,6 @@ if __name__ == '__main__':
         for i in ix:
             ax.plot(w, _integrand(w, 2, Sj2[i]))
         ax.grid()
-
 
     def plot_integrand_3D(w, frq, Sj2):
         # 3D plot
@@ -602,7 +592,6 @@ if __name__ == '__main__':
                                tight_layout=True)
 
         ax.plot_wireframe(Frq, W, I)
-
 
     def test_profile():
         # from line_profiler import LineProfiler
@@ -620,7 +609,6 @@ if __name__ == '__main__':
 
         profiler.print_stats()
         profiler.rank_functions()
-
 
     # test computation
     *frng, n = 1e-3, 10, 256
