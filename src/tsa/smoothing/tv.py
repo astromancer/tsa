@@ -13,7 +13,7 @@ Functions in this module are named after the variables in the Stickel (2011) pap
 # std
 import numbers
 
-# third-party libs
+# third-party
 import numpy as np
 from scipy import sparse
 from scipy.optimize import minimize

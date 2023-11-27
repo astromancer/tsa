@@ -1,20 +1,20 @@
 
-# std libs
+# std
 import warnings
 from collections import defaultdict
 
-# third-party libs
+# third-party
 import numpy as np
+from loguru import logger
 from scipy.signal import get_window
 from astropy.stats import sigma_clipped_stats
-from loguru import logger
 
 # local
 from recipes.array import fold
 
 # relative
-from .spectral import resolve_overlap
 from .windowing import resolve_size
+from .spectral import resolve_overlap
 
 
 # TODO: OCSVM, Tietjen-Moore, Topological Anomaly detection

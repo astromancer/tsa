@@ -8,7 +8,7 @@ import numbers
 import itertools as itt
 from warnings import warn
 
-# third-party libs
+# third-party
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker

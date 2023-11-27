@@ -1,9 +1,9 @@
 
-# third-party libs
+# third-party
 import pytest
 import numpy as np
 
-# local libs
+# local
 from tsa.spectral import Periodogram
 
 

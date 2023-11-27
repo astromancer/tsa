@@ -6,20 +6,22 @@
 # pylint: disable=unused-import
 
 
-# std libs
+# std
 import re
 import itertools as itt
 from pathlib import Path
 
-# third-party libs
+
+# third-party
 import pytest
 import numpy as np
 import matplotlib.pyplot as plt
 
-
+# local
 from tsa.ts import TimeSeries
 from tsa.spectral import Periodogram
 from tsa.ts.generate import Harmonic
+
 
 # ---------------------------------------------------------------------------- #
 # project folder
@@ -28,6 +30,7 @@ SRC = Path(__file__).parent.parent
 RGX_EXAMPLE = re.compile(r'(?s)\n\s*```python\s+(.+?)```')
 
 # ---------------------------------------------------------------------------- #
+
 
 def get_readme_examples(filename=SRC / 'README.md'):
     # sourcery skip: hoist-statement-from-loop

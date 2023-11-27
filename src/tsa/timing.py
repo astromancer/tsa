@@ -1,12 +1,12 @@
 
-# std libs
+# std
 import itertools as itt
 
-# third-party libs
+# third-party
 import numpy as np
 from scipy import stats
 
-# local libs
+# local
 from recipes.lists import flatten
 
 

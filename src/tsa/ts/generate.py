@@ -2,7 +2,7 @@
 Some functions to generate time series data
 """
 
-import numpy  as np
+import numpy as np
 
 class Harmonic:
     
