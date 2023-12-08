@@ -13,8 +13,8 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux"
 ]
-dynamic = ["version", "readme"]
 requires-python = ">=3.8"
+dynamic = ["version", "readme", "optional-dependencies" ]
 dependencies = [
     "attrs", 
     "more_itertools", 
