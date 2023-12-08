@@ -46,6 +46,10 @@ test_init = Expected(TimeSeries)({
 })
 
 
+def test_thin():
+    TimeSeries(t, ym, e).plot(thin=3)
+
+
 # @pytest.mark.mpl_image_compare(baseline_dir = 'images',
 # #                                 remove_text = True)
 # def test_plot():
