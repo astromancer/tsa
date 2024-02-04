@@ -40,7 +40,7 @@ def periodogram(signal, dt=None, norm=None):
     """
     # since we are dealing with real signals, spectrum is symmetric
     normalizer = Normalizer(norm, dt)
-    return normalizer(FFTpower(signal), signal)
+    return normalizer(fft_power(signal), signal)
 
 
 def pds(signal, dt=None):
@@ -66,7 +66,7 @@ def pds(signal, dt=None):
     return periodogram(signal, dt, 'pds')
 
 
-def FFTpower(y):
+def fft_power(y):
     """
     Compute FFT power (aka periodogram).
     """
@@ -113,7 +113,7 @@ def resolve_nwindow(nwindow, split, n, dt):
         return n if split is None else n // int(split)
 
     if isinstance(nwindow, str):
-        return _from_unit_string(nwindow, dt)
+        return windowing.resolve_size()(nwindow, dt)
 
     return int(nwindow)
 
@@ -333,15 +333,15 @@ class FFTBase:
                    ' estimation methods are not appropriate for time series '
                    'with non-constant time steps. You may wish to first '
                    'interpolate the missing points, although it is probably '
-                   'best to use an analysis technique, such as such as the '
-                   'Lomb-Scargle periodogram, which is valid for non-constant '
-                   'time steps. ')
+                   'best to use an estimator which remains valid for non-'
+                   'constant time steps, such as such as the Lomb-Scargle '
+                   'periodogram.')
             if cls.strict:
                 emit = raises(ValueError)
                 msg += ('If you wish to proceed with the assumption of constant'
                         f' timesteps, use \n >>> {cls}.set_strict(False).\nThis'
                         ' message will then be emitted as a warning instead of '
-                        'rasing an exception')
+                        'rasing an exception.')
             #
             emit(msg)
 
@@ -442,7 +442,7 @@ class Periodogram(FFTBase):
         signal = self.prepare_signal(signal, detrend, pad, window)
 
         # calculate periodograms
-        return self.normalizer(FFTpower(signal), signal)
+        return self.normalizer(fft_power(signal), signal)
 
     def plot(self, ax=None, signal_unit=None, dc=False, **kws):
         if ax is None:

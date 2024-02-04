@@ -12,7 +12,7 @@ from warnings import warn
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
-from matplotlib.transforms import Affine2D
+from matplotlib.transforms import Affine2D, blended_transform_factory as btf
 from loguru import logger
 from attr import attrs, attrib as attr
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -21,6 +21,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from recipes import api, dicts
 from recipes.config import ConfigNode
 from recipes.string import named_items
+from recipes.logging import LoggingMixin
 from scrawl.moves import MovableErrorbar
 from scrawl.utils import get_percentiles
 from scrawl.dualaxes import DateTimeDualAxes, DualAxes
@@ -718,7 +719,7 @@ class TimeSeriesPlot(LoggingMixin):
         )
         self.hax.grid(True)
 
-    def set_limits(self, x, y, x_err, y_err):
+    def set_limits(self, x, y, y_err, x_err):
         # set axes view limits
 
         for xy, v, p, e in zip('xy', (x, y), self.plims, (x_err, y_err)):
@@ -726,9 +727,9 @@ class TimeSeriesPlot(LoggingMixin):
             current = getattr(self, f'{xy}lim')
             low, hi = zip(datalim, current)
             new_lim = [min(low), max(hi)]
-            # print(f'xy: {new_lim=}')
+            self.logger.debug('plims = {}, lim = {}', p, new_lim)
 
-            # check compat with scale
+            # check compat with scale,
             scale = getattr(self.ax, f'get_{xy}scale')()
             if scale == 'log':
                 neg = ([x, y][xy == 'y'] <= 0)
@@ -777,6 +778,24 @@ class TimeSeriesPlot(LoggingMixin):
 
     # def animate():
         # simulated_samples from normal distribution given uncertainties
+
+    def acf(self, *data, **kws):
+        data = self.get_data(data)
+
+        self.plims = np.array([(-0.1, 100.1), (-0.1, 100.1)])
+        tsp = self.plot(*data,
+                        errorbar={'ms': 1},
+                        **kws)
+        ax = tsp.ax
+
+        scales = [1.959963984540054, 2.5758293035489004]
+        ci = np.array([[-1], [1]]) * scales / np.sqrt(len(data[0]))
+        ls = [':', '--'] * 2
+        ax.hlines(ci.ravel(), 0, 1, ['0.65'], ls=ls,
+                  transform=btf(ax.transAxes, ax.transData))
+        ax.set(xlabel='Time Lag (s)', ylabel='Auto-Correlation')
+
+        return self
 
 
 # ---------------------------------------------------------------------------- #

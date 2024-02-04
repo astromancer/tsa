@@ -10,10 +10,11 @@ import itertools as itt
 
 # third-party
 import numpy as np
+from scipy.signal import correlate
 
 # local
-from recipes import api
 from recipes.functionals import echo
+from recipes.oo.property import CachedProperty
 
 # relative
 from .plotting import TimeSeriesPlot
@@ -36,9 +37,6 @@ class TimeSeries:
     """
     A basic univariate time series with optional uncertainties.
     """
-
-    # This class ties together the functionality of various libraries for
-    # analysing time series data.
 
     # TODO
     # --------
@@ -79,16 +77,6 @@ class TimeSeries:
     # @classmethod
     # def fromfile(cls, filename):
 
-    @staticmethod
-    def _parse_init_args(t_or_x, x=None, u=None):
-        # signals only
-        if x is None:
-            x = t_or_x
-            return (x.t, x.x, x.u) if isinstance(x, TimeSeries) else (None, x, u)
-
-        # times & signals given
-        return t_or_x, x, u
-
     def __new__(cls, *args, **kws):
         t, x, u = cls._parse_init_args(*args)
 
@@ -101,6 +89,8 @@ class TimeSeries:
 
         return super().__new__(cls)
 
+    # ------------------------------------------------------------------------ #
+    #
     def __init__(self, *args, **kws):
         """
         Create a TimeSeries object
@@ -124,6 +114,19 @@ class TimeSeries:
         # else:
         #     # data represented internally as unumpy.uarray
         #     self._x = unp.uarray(x, u)
+
+    @staticmethod
+    def _parse_init_args(t_or_x, x=None, u=None):
+        # signals only
+        if x is None:
+            x = t_or_x
+            return (x.t, x.x, x.u) if isinstance(x, TimeSeries) else (None, x, u)
+
+        # times & signals given
+        return t_or_x, x, u
+
+    # Properties
+    # ------------------------------------------------------------------------ #
 
     @property
     def t(self):
@@ -152,6 +155,9 @@ class TimeSeries:
         #     raise ValueError(f'Time Series data should be 1D, not {x.ndim}')
 
         # self._x = np.ma.array(x)
+
+        del self.mean
+        del self.var
 
     @property
     def u(self):
@@ -187,8 +193,6 @@ class TimeSeries:
         """Number of variates (time series)."""
         return 1 if self.x.ndim == 1 else self.x.shape[1]
 
-    # def fold(self, eph):
-
     # ------------------------------------------------------------------------ #
 
     def __repr__(self):
@@ -201,6 +205,7 @@ class TimeSeries:
                    data,
                    None if self.u is None else self.u[key])
 
+    #
     # ------------------------------------------------------------------------ #
     def __len__(self):
         return len(self._x)
@@ -208,16 +213,6 @@ class TimeSeries:
     def __iter__(self):
         """allow unpacking: `t, y, u = ts`"""
         yield from (self.t, self.x, self.u)
-
-    def __pos__(self):
-        return self
-
-    def __neg__(self):
-        # pylint: disable=invalid-unary-operand-type
-        return self.__class__(self.t, -self.x)
-
-    def __abs__(self):
-        return self.__class__(self.t, abs(self.x))
 
     # arithmetic
     # --------------------------------------------------------------------------
@@ -241,6 +236,16 @@ class TimeSeries:
         # array-like (any object that can create an array / any duck-type array)
         other = np.asanyarray(other)
         return self.__class__(self.t, op(self._x, other), self.u)
+
+    def __pos__(self):
+        return self
+
+    def __neg__(self):
+        # pylint: disable=invalid-unary-operand-type
+        return self.__class__(self.t, -self.x)
+
+    def __abs__(self):
+        return self.__class__(self.t, abs(self.x))
 
     def __add__(self, other):
         return self._arithmetic(other, operator.add)
@@ -320,6 +325,28 @@ class TimeSeries:
     # object.__ceil__(self)
 
     # ------------------------------------------------------------------------ #
+    @CachedProperty
+    def mean(self):
+        # In standard statistical practice, ``ddof=1`` provides an unbiased
+        # estimator of the variance of a hypothetical infinite population.
+        # ``ddof=0`` provides a maximum likelihood estimate of the variance for
+        # normally distributed variables.
+        return self.x.mean(0)
+
+    @CachedProperty(depends_on=mean)
+    def var(self):
+        # unbiased estimate of population variance
+        return self.x.var(0, ddof=1)
+
+    @CachedProperty(depends_on=var)
+    def std(self):
+        return np.sqrt(self.var)
+
+    # ------------------------------------------------------------------------ #
+
+    def copy(self):
+        return type(self)(*self)
+
     def append(self, ts):
 
         if isinstance(ts, tuple):
@@ -334,15 +361,6 @@ class TimeSeries:
             self.u = np.hstack([self.u, ts.u])
 
     # ------------------------------------------------------------------------ #
-    @api.synonyms({'(histogram)|(marginal)': 'hist'})
-    def plot(self, ax=None, title='', hist=(), plims=CONFIG.plims, **kws):
-        #
-        tsp = TimeSeriesPlot(ax, title, hist, plims)
-        tsp.plot(*self, **kws)
-        tsp.ax.set(xlabel='Time (s)',
-                   ylabel='Signal')
-        return tsp
-
     def periodogram(self, window=None, detrend=None, pad=None, normalize=None):
         from tsa.spectral import Periodogram
 
@@ -356,6 +374,60 @@ class TimeSeries:
                            nwindow, noverlap,
                            window, detrend,
                            pad, split, normalize)
+
+    def correlogram(self, max_lag=None, method=None):
+        top = (max_lag or self.n) + 1
+        t = self.t[:top] - self.t[0]
+
+        if method is None:
+            method = 'direct' if np.ma.is_masked(self.x) else 'fft'
+        else:
+            method = str(method).lower()
+
+        assert method in {'fft', 'direct'}
+
+        if method == 'direct':
+            x = self.normalize().x
+            a = map(_lag_acor_norm, itt.repeat(x), range(1, top))
+            a = np.ma.array(list(a), 'O')
+            v = np.ma.MaskedArray(a.filled(-1).astype(float), a.mask)
+        else:
+            x = 4 * (self.x - self.mean) / self.var
+            
+            if np.ma.is_masked(x):
+                warnings.warn('Imputing masked data with sample mean.')
+                x = x.filled(x.mean())
+
+            c = correlate(x, x, 'full')
+            v = c[self.n - 1:]
+            v[0] /= 16
+
+        return type(self)(t, v)
+
+    acf = correlogram
+    
+    def normalize(self, loc=True, scale=True):
+
+        y = self.x
+        v = self.u
+
+        if loc:
+            y = y - self.mean
+
+        if scale:
+            y = y / self.std
+
+            if v is not None:
+                v = v / self.std
+
+        return type(self)(self.t, y, v)
+
+    # def fold(self, eph):
+
+
+def _lag_acor_norm(x, lag):
+    n = len(x)
+    return (x[:n - lag] * x[lag:]).sum(0) / n
 
 
 class MultiVariateTimeSeries(TimeSeries):
@@ -378,3 +450,7 @@ class MultiVariateTimeSeries(TimeSeries):
         return kls(None if self.t is None else self.t[key],
                    data,
                    None if self.u is None else self.u[key, m])
+
+
+# alias
+MultivariateTimeSeries = MultiVariateTimeSeries
