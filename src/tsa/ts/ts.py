@@ -5,6 +5,8 @@ Time series objects
 # std
 import numbers
 import operator
+import warnings
+import itertools as itt
 
 # third-party
 import numpy as np
@@ -14,7 +16,7 @@ from recipes import api
 from recipes.functionals import echo
 
 # relative
-from .plotting import CONFIG, TimeSeriesPlot
+from .plotting import TimeSeriesPlot
 
 
 # import uncertainties.unumpy as unp  # linear uncertainty propagation
@@ -66,6 +68,13 @@ class TimeSeries:
 
     #  Not supported
     #  - units.  Make sure you use compatible units when doing arithmetic
+
+    # ------------------------------------------------------------------------ #
+    plot = TimeSeriesPlot(xlabel='Time (s)',
+                          ylabel='Signal')
+
+    # ------------------------------------------------------------------------ #
+    # Constructors
 
     # @classmethod
     # def fromfile(cls, filename):

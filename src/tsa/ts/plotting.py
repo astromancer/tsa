@@ -294,7 +294,7 @@ def _resolve_data_step(n, thin, max_points):
 
 def _thin_data(data, thin, max_points):
 
-    if thin == 1 and max_points:
+    if (thin == 1 and max_points):
         data = list(data)
         n = sum(len(v[0]) for v in data)
 
@@ -303,12 +303,14 @@ def _thin_data(data, thin, max_points):
         logger.debug('Thinning plot data by {} so we have fewer than {} points.',
                      thin, max_points)
 
+    thin = int(thin)
     if thin == 1:
         yield from data
         return
 
-    thin = int(thin)
-    logger.debug('Thinning plot data by {}.', thin)
+    if not max_points:
+        logger.debug('Thinning plot data by {}.', thin)
+
     for *vectors, label in data:
         yield (*_thinner(thin, *vectors), label)
 
@@ -375,7 +377,7 @@ def get_line_colours(n, colours, cmap):
     # `cmap` always used if given
     # `colours` always used if given, except if `cmap` given
     #   warning emitted if too few colours - colour sequence will repeat
-    too_few_colours = len(mpl.rcParams['axes.prop_cycle']) < n
+    too_few_colours = len(plt.rcParams['axes.prop_cycle']) < n
     if (cmap is not None) or ((colours is None) and too_few_colours):
         cm = plt.get_cmap(cmap)
         colours = cm(np.linspace(0, 1, n))  # linear colour map for ts
@@ -448,11 +450,12 @@ def get_axes(ax, figsize=None, twinx=None, **kws):
     return plt.subplots(figsize=figsize)
 
 
-def setup_figure(ax, show_hist):
+def setup_figure(ax, show_hist, **kws):
     """Setup figure geometry"""
 
     # FIXME:  leave space on the right of figure to display offsets
-    fig, ax = get_axes(ax)
+
+    fig, ax = get_axes(ax, kws.pop('figsize', None))
 
     # Add subplot for histogram
     hax = None
@@ -471,22 +474,34 @@ def setup_figure(ax, show_hist):
     #         hax.set_prop_cycle(ccyc)
 
     ax.grid()  # which='both' b=True
+    ax.set(**kws)
     return fig, ax, hax
 
 
 # ---------------------------------------------------------------------------- #
-
-class TimeSeriesPlot:
+class TimeSeriesPlot(LoggingMixin):
     """
     Multivatiate time series plotting.
     """
 
     # TODO: evolve to multiprocessed TS plotter.
 
-    def __init__(self, ax=None, title='', hist=(), plims=CONFIG.plims):
+    def __get__(self, instance, kls):
+        if instance:  # lookup from instance
+            self.parent = instance
 
-        self.fig, self.ax, self.hax = setup_figure(ax, hist)
+        return self  # lookup from class
+
+    def __init__(self, title='', hist=(), plims=CONFIG.plims,
+                 colors=None, cmap=None, **kws):
+
+        self.title = str(title)
+        self.fig = self.ax = self.hax = None
+        self.colors = colors
+        self.cmap = cmap
+
         self.art = []
+        self._show_hist = bool(hist)
         self.hist = []
         self._linked = []
         # _proxies = []
@@ -504,6 +519,7 @@ class TimeSeriesPlot:
         self.zorder0 = 10
 
         self.styles = {}
+        self.kws = kws
 
         # default layout for pretty figures
         # left, bottom, right, top = [0.025, 0.01, 0.97, .98]
@@ -517,13 +533,12 @@ class TimeSeriesPlot:
     @api.synonyms({'(histogram)|(marginal)': 'hist',
                    'time0': 't0',
                    't(ime)?_?scale': 'tscale'})
-    def plot(self, *data,
-             t0=None, tscale=None,
-             hist=False, show_masked=False,
-             max_points=1e4, thin=1,
-             colors=None, cmap=None,
-             draggable=False, labels=(), offsets=(),
-             **kws):
+    def __call__(self, *data,
+                 t0=None, tscale=None,
+                 hist=False, show_masked=False,
+                 max_points=1e4, thin=1,
+                 draggable=False, labels=(), offsets=(),
+                 **kws):
         """
         Plot time series
 
@@ -557,9 +572,14 @@ class TimeSeriesPlot:
 
         # Check keyword argument validity
         kws, styles = resolve_kws(kws)
-        show_hist = bool(len(kws.get('hist', {})))
+        show_hist = bool(hist)
+
+        # setup figure
+        ax = kws.pop('ax', None)
+        self.fig, self.ax, self.hax = setup_figure(ax, self._show_hist)
 
         # parse input args: times, signals, y_err, x_err
+        data = self.get_data(data)
         data = get_data(data, labels, thin, max_points, t0, tscale)
 
         # Plot
@@ -582,7 +602,8 @@ class TimeSeriesPlot:
         # print('setting lims: ', self.ylim)
         for xy in 'xy':
             lim = getattr(self, f'{xy}lim')
-            # if np.isfinite(lim).all():
+            lim = np.where(np.isfinite(lim), lim, [None, None])
+            # print(lim)
             self.ax.set(**{f'{xy}lim': lim})
             # else:
 
@@ -600,7 +621,7 @@ class TimeSeriesPlot:
             # FIXME: maybe warn if both draggable and show_hist
             # make the artists draggable
 
-            self.plots = MovableErrorbar(self.art, offsets=kws.offsets,
+            self.plots = MovableErrorbar(self.art, offsets=offsets,
                                          linked=self._linked,
                                          **styles.legend)
             # TODO: legend with linked plots!
@@ -610,6 +631,17 @@ class TimeSeriesPlot:
             # self._make_legend(ax, self.art, labels)
 
         return self
+
+    plot = __call__
+    
+    def get_data(self, data):
+        if data:
+            return data
+
+        if self.parent is not None:
+            return tuple(self.parent)
+
+        raise ValueError('Please provide data to plot.')
 
     def errorbar(self, x, y, y_err, x_err, label,
                  show_masked=False, show_hist=False, relative_time=False,
