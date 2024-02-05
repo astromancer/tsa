@@ -427,27 +427,24 @@ class TimeSeries(LoggingMixin):
         t = self.t[:top] - self.t[0]
 
         self.logger.info('Computing Auto-correlation spectrum via {} method.', method)
-
+        x = self.normalize().x
+        
         if method == 'direct':
-            x = self.normalize().x
-            v = _acf_direct(x, max_lag, njobs)
-        else:
-            v = np.ma.empty((self.m, max_lag))
-            x = (self.x - self.mean) / self.var
-            norm = np.sum(x ** 2, 0, keepdims=True).T
+            return type(self)(t, _acf_direct(x, max_lag, njobs).T)
+    
+        # FFT method
+        v = np.ma.empty((self.m, max_lag))
+        for i, x in enumerate(x[(..., *[np.newaxis] * (self.m == 1))].T):
+            if np.ma.is_masked(x):
+                warnings.warn('Imputing masked data with sample mean.')
+                y = x.filled(x.mean())
 
-            for i, x in enumerate(x[(..., *[np.newaxis] * (self.m == 1))].T):
-                if np.ma.is_masked(x):
-                    warnings.warn('Imputing masked data with sample mean.')
-                    x = x.filled(x.mean())
+            c = correlate(y, y, 'full')
+            v[i] = c[self.n - 1:]
 
-                c = correlate(x, x, 'full')
-                v[i] = c[self.n - 1:]
-
-            # normalize
-            v /= norm
-
-        return type(self)(t, v.T)
+        # normalize
+        norm = np.sum(x ** 2, 0, keepdims=True)
+        return type(self)(t, (v / norm).T)
 
     acf = correlogram
 
