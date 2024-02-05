@@ -14,12 +14,15 @@ from scipy.signal import correlate
 
 # local
 from recipes.functionals import echo
+from recipes.concurrent import Executor
+from recipes.logging import LoggingMixin
 from recipes.oo.property import CachedProperty
 
 # relative
 from .plotting import TimeSeriesPlot
 
 
+# ---------------------------------------------------------------------------- #
 # import uncertainties.unumpy as unp  # linear uncertainty propagation
 # since this library is tracking correlations between rvs operations like mean
 # on an array is n^2 or n^3 which means its actually too slow to be useful.
@@ -32,8 +35,40 @@ from .plotting import TimeSeriesPlot
 
 # for now calculations on uncertainty has to be done manually which is a pain..
 
+# ---------------------------------------------------------------------------- #
 
-class TimeSeries:
+
+class ACFDirect(Executor):
+    def compute(self, data, index, **kws):
+        i, j = index
+        r = _lag_acor_norm(data[i], j + 1)
+        if not np.ma.is_masked(r):
+            self.results[index] = r
+        # print(i, j, r)
+
+
+def _lag_acor_norm(x, lag):
+    """Lagged autocorrelation for standard normal variable"""
+    n = len(x)
+    return (x[:n - lag] * x[lag:]).sum(0) / n
+
+
+def _acf_direct(x, max_lag, njobs=-1, backend='multiprocessing'):
+
+    x = x[(..., *[np.newaxis] * (x.ndim == 1))].T
+    indices = itt.product(range(len(x)), range(max_lag))
+
+    task = ACFDirect(backend=backend)
+    task.init_memory((len(x), max_lag))
+    task.run(x, indices, njobs)
+
+    return np.ma.MaskedArray(task.results, np.isnan(task.results))
+
+
+# ---------------------------------------------------------------------------- #
+
+
+class TimeSeries(LoggingMixin):
     """
     A basic univariate time series with optional uncertainties.
     """
@@ -84,7 +119,7 @@ class TimeSeries:
             obj = super().__new__(MultiVariateTimeSeries)
             # init will not run automatically since this returns an object of a
             # different class
-            obj.__init__(t, x, u)
+            cls.__init__(obj, t, x, u)
             return obj
 
         return super().__new__(cls)
@@ -114,6 +149,9 @@ class TimeSeries:
         # else:
         #     # data represented internally as unumpy.uarray
         #     self._x = unp.uarray(x, u)
+
+        if self.m == 3:
+            raise RuntimeError
 
     @staticmethod
     def _parse_init_args(t_or_x, x=None, u=None):
@@ -375,9 +413,7 @@ class TimeSeries:
                            window, detrend,
                            pad, split, normalize)
 
-    def correlogram(self, max_lag=None, method=None):
-        top = (max_lag or self.n) + 1
-        t = self.t[:top] - self.t[0]
+    def correlogram(self, max_lag=None, method=None, njobs=-1):
 
         if method is None:
             method = 'direct' if np.ma.is_masked(self.x) else 'fft'
@@ -386,26 +422,35 @@ class TimeSeries:
 
         assert method in {'fft', 'direct'}
 
+        max_lag = int(max_lag or self.n)
+        top = max_lag
+        t = self.t[:top] - self.t[0]
+
+        self.logger.info('Computing Auto-correlation spectrum via {} method.', method)
+
         if method == 'direct':
             x = self.normalize().x
-            a = map(_lag_acor_norm, itt.repeat(x), range(1, top))
-            a = np.ma.array(list(a), 'O')
-            v = np.ma.MaskedArray(a.filled(-1).astype(float), a.mask)
+            v = _acf_direct(x, max_lag, njobs)
         else:
-            x = 4 * (self.x - self.mean) / self.var
-            
-            if np.ma.is_masked(x):
-                warnings.warn('Imputing masked data with sample mean.')
-                x = x.filled(x.mean())
+            v = np.ma.empty((self.m, max_lag))
+            x = (self.x - self.mean) / self.var
+            norm = np.sum(x ** 2, 0, keepdims=True).T
 
-            c = correlate(x, x, 'full')
-            v = c[self.n - 1:]
-            v[0] /= 16
+            for i, x in enumerate(x[(..., *[np.newaxis] * (self.m == 1))].T):
+                if np.ma.is_masked(x):
+                    warnings.warn('Imputing masked data with sample mean.')
+                    x = x.filled(x.mean())
 
-        return type(self)(t, v)
+                c = correlate(x, x, 'full')
+                v[i] = c[self.n - 1:]
+
+            # normalize
+            v /= norm
+
+        return type(self)(t, v.T)
 
     acf = correlogram
-    
+
     def normalize(self, loc=True, scale=True):
 
         y = self.x
@@ -423,11 +468,6 @@ class TimeSeries:
         return type(self)(self.t, y, v)
 
     # def fold(self, eph):
-
-
-def _lag_acor_norm(x, lag):
-    n = len(x)
-    return (x[:n - lag] * x[lag:]).sum(0) / n
 
 
 class MultiVariateTimeSeries(TimeSeries):

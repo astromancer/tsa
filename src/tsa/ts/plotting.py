@@ -534,7 +534,7 @@ class TimeSeriesPlot(LoggingMixin):
     @api.synonyms({'(histogram)|(marginal)': 'hist',
                    'time0': 't0',
                    't(ime)?_?scale': 'tscale'})
-    def __call__(self, *data,
+    def __call__(self, *data, ax=None,
                  t0=None, tscale=None,
                  hist=False, show_masked=False,
                  max_points=1e4, thin=1,
@@ -576,7 +576,6 @@ class TimeSeriesPlot(LoggingMixin):
         show_hist = bool(hist)
 
         # setup figure
-        ax = kws.pop('ax', None)
         self.fig, self.ax, self.hax = setup_figure(ax, self._show_hist)
 
         # parse input args: times, signals, y_err, x_err
@@ -791,7 +790,7 @@ class TimeSeriesPlot(LoggingMixin):
         scales = [1.959963984540054, 2.5758293035489004]
         ci = np.array([[-1], [1]]) * scales / np.sqrt(len(data[0]))
         ls = [':', '--'] * 2
-        ax.hlines(ci.ravel(), 0, 1, ['0.65'], ls=ls,
+        ax.hlines(ci.ravel(), 0, 1, ['0.65'], ls=ls, lw=1,
                   transform=btf(ax.transAxes, ax.transData))
         ax.set(xlabel='Time Lag (s)', ylabel='Auto-Correlation')
 
