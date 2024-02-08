@@ -45,7 +45,9 @@ def periodogram(signal, dt=None, norm=None):
 
 def pds(signal, dt=None):
     """
-    Power density spectrum
+    Power density spectrum is a theoretical construct. This computes a
+    periodogram (a psd estimate), normalized to have the same units as the true
+    psd.
 
     Parameters
     ----------
@@ -66,13 +68,13 @@ def pds(signal, dt=None):
     return periodogram(signal, dt, 'pds')
 
 
-def fft_power(y):
+def fft_power(y, axis=0):
     """
     Compute FFT power (aka periodogram).
     """
 
     # Power
-    return np.square(np.abs(scipy.fft.rfft(y, workers=-1)))
+    return np.square(np.abs(scipy.fft.rfft(y, axis=axis, workers=-1)))
 
 
 # def cross_spectrum(signalA, signalB):
@@ -224,12 +226,12 @@ class Normalizer:
             how = how.lower()
 
         if how not in NORMS:
-            raise ValueError('Unknown normalization %r requested' % how)
+            raise ValueError(f'Unknown normalization: {how!r} ')
 
         if how and how.endswith(('density', 'pds', 'rms')) and (dt is None):
             raise ValueError(
-                'Require sampling time interval to normalise spectrum as '
-                'density / rms'
+                'Sampling time interval `dt` is required to normalise spectrum '
+                'as density / rms.'
             )
 
         self.name = self.SYNONYMS.get(how, how)
@@ -247,8 +249,7 @@ class Normalizer:
         # double the DC component, and in the case of even number of
         # frequencies, the last point (which is unpaired Nyquist freq)
         nwindow = segments.shape[-1]
-        end = None if (nwindow % 2) else -1
-        power[1:end] *= 2
+        power[1:(-1, None)[nwindow % 2]] *= 2
         # can check Parceval's theorem here
 
         # NOTE: each segment will be normalized individually
@@ -296,23 +297,26 @@ class Normalizer:
 #                 raise ValueError(borkmsg % (kws[key], key, allowed_vals))
 
 
+# class SDE
+
 class FFTBase:
     """
-    Base class for Fast Fourier Transform based spectral analysis
+    Base class for Fast Fourier Transform based spectral density estimators.
     """
 
     strict = True
 
-    @classmethod
-    def set_strict(cls, b=True):
-        """
-        Controls behaviour when receiving time stamp arrays that have
-        non-constant time step intervals.
-        """
-        cls.strict = bool(b)
+    # @classmethod
+    # def set_strict(cls, b=True):
+    #     """
+    #     Controls behaviour when receiving time stamp arrays that have
+    #     non-constant time step intervals.
+    #     """
+    #     cls.strict = bool(b)
 
     def __init__(self, t_or_x, signal=None, normalize=None,  unit='',
-                 /, dt=1):
+                 /, dt=1, strict=True):
+        
         # use TimeSeries class to check and sanitize times / signals
         t, signal, _ = self._ts = TimeSeries(t_or_x, signal)
         dt, signal = self._check_input(signal, t, dt)
@@ -321,6 +325,7 @@ class FFTBase:
         self.dt = dt
         self.T = self.dt * len(signal)
         self.df = 1 / self.T
+        self.strict = bool(strict)
 
         # normalization
         self.normalizer = Normalizer(normalize, dt, signal_unit=unit)
@@ -338,9 +343,10 @@ class FFTBase:
                    'periodogram.')
             if cls.strict:
                 emit = raises(ValueError)
-                msg += ('If you wish to proceed with the assumption of constant'
-                        f' timesteps, use \n >>> {cls}.set_strict(False).\nThis'
-                        ' message will then be emitted as a warning instead of '
+                msg += (' If you wish to proceed with the assumption of '
+                        'constant timesteps, use \n'
+                        f' >>> {cls.__name__}.strict = False.\nThis '
+                        'message will then be emitted as a warning instead of '
                         'rasing an exception.')
             #
             emit(msg)
@@ -394,11 +400,11 @@ class Periodogram(FFTBase):
                  detrend=None,
                  pad=None,
                  normalize=None,
-                 /, dt=1):
+                 /, dt=1, strict=True):
 
-        FFTBase.__init__(self, t_or_x, signal, normalize, dt=dt)
+        FFTBase.__init__(self, t_or_x, signal, normalize, dt=dt, strict=strict)
 
-        n = len(self.signal)
+        n = len(self.signal)  # self._ts.n
         self.padding = self.npadded, *_ = resolve_padding(n, self.dt, pad)
 
         # calculate periodograms
@@ -416,16 +422,23 @@ class Periodogram(FFTBase):
         # FFT frequencies
         return np.fft.rfftfreq(self.npadded, self.dt)
 
+    def compute(self, signal, detrend, pad, window):
+
+        signal = self.prepare_signal(signal, detrend, pad, window)
+
+        # calculate periodograms
+        return self.normalizer(fft_power(signal), signal)
+
     def prepare_signal(self, signal, detrend, pad, window):
 
         # detrend
-        method, n, kws = detrending.resolve_detrend(detrend)
-        signal = detrending.detrend(signal, method, n, **kws)
+        method, params, kws = detrending.resolve_detrend(detrend)
+        signal = detrending.detrend(signal, method, params, **kws)
 
         # padding
         if pad:
             npad, method, kws = pad
-            extra = npad - self.n
+            extra = npad - len(signal)
 
             # this does pre- AND post padding
             #  WARNING: does this mess with the phase??
@@ -437,13 +450,6 @@ class Periodogram(FFTBase):
         # apply windowing
         return windowing.windowed(signal, window)
 
-    def compute(self, signal, detrend, pad, window):
-
-        signal = self.prepare_signal(signal, detrend, pad, window)
-
-        # calculate periodograms
-        return self.normalizer(fft_power(signal), signal)
-
     def plot(self, ax=None, signal_unit=None, dc=False, **kws):
         if ax is None:
             fig, ax = plt.subplots()
@@ -451,13 +457,18 @@ class Periodogram(FFTBase):
         # dict(ls='-')
         # ignore DC component for plotting
         i = int(not dc)
-        line, = ax.plot(self.frq[i:], self.power[i:], **kws)
+        frq = self.frq[i:]
+        lines = []
+        for power in self.power[i:].T:
+            lines.extend(ax.plot(frq, power, **kws))
 
         ax.set(xlabel=self.get_xlabel(),
-               ylabel=self.get_ylabel(signal_unit))
+               ylabel=self.get_ylabel(signal_unit),
+               yscale='log')
         ax.grid()
         ax.figure.tight_layout()
-        return line
+        
+        return fig, ax
 
 
 # synonymns = dict(apodize='window',
@@ -538,7 +549,7 @@ class Spectrogram(Periodogram):
                  pad=None,
                  split=None,
                  normalize='rms',
-                 /, dt=1):
+                 /, dt=1, strict=True):
         """
         Compute the spectrogram of a time series. Optional arguments allow for
         signal de-trending, padding (tapering).
@@ -583,7 +594,7 @@ class Spectrogram(Periodogram):
 
         # super().__init__(*args, window, detrend, pad, dt,  normalize)
 
-        FFTBase.__init__(self, t_or_x, signal, normalize, dt=dt)
+        FFTBase.__init__(self, t_or_x, signal, normalize, dt=dt, strict=strict)
 
         # t, signal = prepare_signal(signal, t, self.dt, gaps)
         n = len(self.signal)

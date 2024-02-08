@@ -1,4 +1,6 @@
 """
 Time Series objects
 """
-from .ts import *
+
+# relative
+from .ts import MultiVariateTimeSeries, TimeSeries

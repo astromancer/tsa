@@ -1,3 +1,6 @@
+"""
+Time step inspection.
+"""
 
 # std
 import itertools as itt
@@ -56,7 +59,7 @@ def summary(t, rtol=1e-5, atol=1e-8):
 
     # non-constant time steps!
     unqdt = np.unique(deltas)
-    mode = stats.mode(deltas)
+    mode = stats.mode(deltas, keepdims=False)
     dt = mode.mode
     if len(unqdt) > 5:
         info = f'{len(unqdt)} unique values between {deltas.min(), deltas.max()}'
@@ -198,14 +201,14 @@ def fill_gaps(t, y, kct=None, mode='linear', option=None, fill=True,
         tfill.append(t_fill)  # fill gaps in original data
         yfill.append(y_fill)
 
-        if return_index:
+        if indexed:
             idx += list(range(i + 1, i + 1 + len(t_fill)))
 
     if fill:
         tfill = fill_array(t, gap_idx, tfill)
         yfill = fill_array(y, gap_idx, yfill)
 
-    if return_index:
+    if indexed:
         return tfill, yfill, idx
     else:
         return tfill, yfill
