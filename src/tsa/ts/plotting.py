@@ -14,19 +14,20 @@ import matplotlib.pyplot as plt
 from matplotlib import ticker
 from matplotlib.transforms import Affine2D, blended_transform_factory as btf
 from loguru import logger
-from attr import attrs, attrib as attr
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # local
 from recipes import api, dicts
 from recipes.config import ConfigNode
 from recipes.string import named_items
-from recipes.logging import LoggingMixin
 from scrawl.moves import MovableErrorbar
 from scrawl.utils import get_percentiles
 from scrawl.dualaxes import DateTimeDualAxes, DualAxes
 from scrawl.ticks import (OffsetLocator, SexagesimalFormatter,
                           _rotate_tick_labels)
+
+# relative
+from .interface import Interface
 
 
 # ---------------------------------------------------------------------------- #
@@ -60,7 +61,11 @@ from scrawl.ticks import (OffsetLocator, SexagesimalFormatter,
 # Module config
 CONFIG = ConfigNode.load_module(__file__)
 
+# array printing (logging)
+np.set_printoptions(threshold=100, precision=3, linewidth=120)
+
 STYLE_KWS = {
+    'line',
     'errorbar',
     'spans',
     'hist',
@@ -76,9 +81,9 @@ ALLOWED_KWS = {
     *STYLE_KWS
 }
 
-# ---------------------------------------------------------------------------- #
-
 TWIN_AXES_CLASSES = {'sexa': DateTimeDualAxes}
+
+# ---------------------------------------------------------------------------- #
 N_MAX_TS_PLOT = 50
 
 
@@ -91,14 +96,14 @@ class TooManyToPlot(Exception):
 
 
 # ---------------------------------------------------------------------------- #
+# @dataclass
+# class DataPercentileAxesLimits:
 
-@attrs
-class DataPercentileAxesLimits:
-    lower = attr(-0.05)
-    upper = attr(+1.05)
+#     lower: float = -0.05
+#     upper: float = +100.05
 
-    def get(self, data, e=()):
-        return get_percentiles(data, (self.lower, self.upper), e)
+#     def get(self, data, e=()):
+#         return get_percentiles(data, (self.lower, self.upper), e)
 
 
 # ---------------------------------------------------------------------------- #
@@ -108,9 +113,9 @@ def _set_defaults(props, defaults):
         props.setdefault(k, v)
 
 
-def resolve_kws(kws):
+def resolve_kws(kws, strict=False):
 
-    if invalid := set(kws.keys()) - set(ALLOWED_KWS):
+    if strict and (invalid := set(kws.keys()) - set(ALLOWED_KWS)):
         raise KeyError(
             f"Invalid {named_items(invalid, 'keyword', fmt=repr)}.\n"
             f"Only the following keywords are recognised: {ALLOWED_KWS}."
@@ -118,11 +123,12 @@ def resolve_kws(kws):
 
     kws, user_styles = dicts.split(kws, *STYLE_KWS)
     styles = dict(zip(STYLE_KWS, map(CONFIG.get, STYLE_KWS)))
+
+    # deal with nested dicts
     for key, val in user_styles.items():
-        # deal with keyword args for which values are dict
         styles[key].update(val)
 
-    return kws, dicts.AttrReadItem(styles)
+    return kws, ConfigNode(styles)
 
 
 # ---------------------------------------------------------------------------- #
@@ -194,15 +200,15 @@ def _parse_input(data, labels):
     yield labels
 
 
-def auto_transpose(array, like):
-    time_axis = np.argmax(like.shape)
-    assert time_axis == 1
+def auto_transpose(array, shortest=1):
 
+    # NOTE: atleast_2d may return masked array
     array = np.atleast_2d(array)
     assert array.ndim == 2
 
-    if np.argmax(array.shape) != 1:
-        logger.info('Transposing input data to match time coordinates.')
+    if np.argmax(array.shape) != shortest:
+        logger.info('Transposing input data to column-variate form: {}',
+                    array.shape[::-1])
         return array.T
 
     return array
@@ -216,7 +222,7 @@ def get_data(data, labels, thin=1, max_points=None, t0=None, tscale=None):
     # zip_longest in case errors or times are empty sequences
     data = itt.zip_longest(*data, fillvalue=())
 
-    #
+    # performance tradeoff: thin data since plotting many point is a bottleneck
     data = _thin_data(data, thin, max_points)
 
     #
@@ -228,11 +234,11 @@ def resolve_data(data, labels):
 
     times, signals, y_err, x_err, labels = _parse_input(data, labels)
     #
-    if (is_uniform(times) and is_uniform(signals)):
-        # auto transpose
-        times = np.atleast_2d(times)
-        # NOTE: atleast_2d may return masked array
-        signals = auto_transpose(signals, times)
+    if is_uniform(signals):
+        # auto transpose so columns are variates, rows are data
+        signals = auto_transpose(signals)
+        times = auto_transpose(times) if len(times) else np.arange(signals.shape[1])
+
     elif (len(times) != len(signals)):
         # ragged signal list, explicit time stamps
         raise ValueError(
@@ -243,10 +249,10 @@ def resolve_data(data, labels):
 
     # safety breakout for erroneous arguments that can trigger very slow
     # plotting loop
-    n = len(signals)
-    if n > N_MAX_TS_PLOT:
+    m = len(signals)
+    if m > N_MAX_TS_PLOT:
         raise TooManyToPlot(
-            f'Received {n} time series to plot. This is probably not what you '
+            f'Received {m} time series to plot. This is probably not what you '
             'wanted. Stopping since safety limit is currently set to '
             f'{N_MAX_TS_PLOT}. This is to avoid accidental compute intensive '
             'commands from overwhelming system resources.'
@@ -267,7 +273,8 @@ def check_data(name, array, signals, fill=()):
         return
 
     if is_uniform(signals) and is_uniform(array):
-        array = auto_transpose(array, signals)
+        array = auto_transpose(array)
+        signals = auto_transpose(signals)
 
     n = len(signals)
     if n < (m := len(array)):
@@ -301,15 +308,17 @@ def _thin_data(data, thin, max_points):
 
         max_points = int(max_points)
         thin = _resolve_data_step(n, thin, max_points)
-        logger.debug('Thinning plot data by {} so we have fewer than {} points.',
-                     thin, max_points)
+        if thin != 1:
+            logger.debug('Thinning plot data by {} so we have fewer than {} '
+                         'plot points.', thin, max_points)
 
+    #
     thin = int(thin)
     if thin == 1:
         yield from data
         return
 
-    if not max_points:
+    if not max_points and (thin != 1):
         logger.debug('Thinning plot data by {}.', thin)
 
     for *vectors, label in data:
@@ -451,51 +460,18 @@ def get_axes(ax, figsize=None, twinx=None, **kws):
     return plt.subplots(figsize=figsize)
 
 
-def setup_figure(ax, show_hist, **kws):
-    """Setup figure geometry"""
-
-    # FIXME:  leave space on the right of figure to display offsets
-
-    fig, ax = get_axes(ax, kws.pop('figsize', None))
-
-    # Add subplot for histogram
-    hax = None
-    if show_hist:
-        divider = make_axes_locatable(ax)
-        hax = divider.append_axes('right', size='25%', pad=0.,
-                                  sharey=ax)
-        hax.grid()
-        hax.yaxis.tick_right()
-
-    # # NOTE: #mpl >1.4 only
-    # if colours is not None:
-    #     ccyc = cycler('color', colours)
-    #     ax.set_prop_cycle(ccyc)
-    #     if show_hist:
-    #         hax.set_prop_cycle(ccyc)
-
-    ax.grid()  # which='both' b=True
-    ax.set(**kws)
-    return fig, ax, hax
-
-
 # ---------------------------------------------------------------------------- #
-class TimeSeriesPlot(LoggingMixin):
+class TimeSeriesPlot(Interface):
     """
     Multivatiate time series plotting.
     """
 
     # TODO: evolve to multiprocessed TS plotter.
 
-    def __get__(self, instance, kls):
-        if instance:  # lookup from instance
-            self.parent = instance
-
-        return self  # lookup from class
-
     def __init__(self, title='', hist=(), plims=CONFIG.plims,
-                 colors=None, cmap=None, **kws):
+                 colors=None, cmap=None, max_points=1e4, **kws):
 
+        self.parent = None
         self.title = str(title)
         self.fig = self.ax = self.hax = None
         self.colors = colors
@@ -507,6 +483,9 @@ class TimeSeriesPlot(LoggingMixin):
         self._linked = []
         # _proxies = []
 
+        # max number of plot points
+        self.max_points = int(max_points)
+
         # axes limits
         plims = np.array(plims)
         if plims.shape == (2, ):
@@ -514,9 +493,6 @@ class TimeSeriesPlot(LoggingMixin):
 
         assert plims.shape == (2, 2), f'{plims.shape}'
         self.plims = plims
-        self.xlim = np.array([np.inf, -np.inf])
-        self.ylim = np.array([np.inf, -np.inf])
-
         self.zorder0 = 10
 
         self.styles = {}
@@ -536,9 +512,8 @@ class TimeSeriesPlot(LoggingMixin):
                    't(ime)?_?scale': 'tscale'})
     def __call__(self, *data, ax=None,
                  t0=None, tscale=None,
-                 hist=False, show_masked=False,
-                 max_points=1e4, thin=1,
-                 draggable=False, labels=(), offsets=(),
+                 hist=False, show_masked=False, thin=1,
+                 labels=(), offsets=(), draggable=False,
                  **kws):
         """
         Plot time series
@@ -575,43 +550,35 @@ class TimeSeriesPlot(LoggingMixin):
         kws, styles = resolve_kws(kws)
         show_hist = bool(hist)
 
-        # setup figure
-        self.fig, self.ax, self.hax = setup_figure(ax, self._show_hist)
+        # setup figure if needed
+        self.fig, self.ax, self.hax = self.setup_figure(ax, self._show_hist)
+
+        self.logger.info(f'{self.xlim = }, {self.ylim = }')
 
         # parse input args: times, signals, y_err, x_err
         data = self.get_data(data)
-        data = get_data(data, labels, thin, max_points, t0, tscale)
+        data = get_data(data, labels, thin, self.max_points, t0, tscale)
 
         # Plot
-        # zip_longest in case errors or times are empty sequences
-        for t, y, σy, σt, label in data:
-            # print(np.shape(t), np.shape(y), np.shape(σy), np.shape(σt))
-            # if yo:
-            #     y = y + yo
-            self.errorbar(t, y, σy, σt, label, show_masked,
-                          show_hist, False, None, 1, styles)
+        for x, y, σy, σx, label in data:
+            # note: errors or times are empty sequences here if not user provided
+            logger.opt(lazy=True).debug(
+                '{}', lambda: (f'Now plotting {label or ""}:'
+                               f'\n{x = },\n {y = },\n {σy = },\n {σx = }')
+            )
+
+            self.plot(x, y, σy, σx, label, thin, show_masked, show_hist,
+                      styles=styles, **kws)
+
+        # set auto-scale limits
+        for xy in 'xy':
+            lim = getattr(self, f'{xy}lim')
+            lim = np.where(np.isfinite(lim), lim, [None, None])
+            self.ax.set(**{f'{xy}lim': lim})
 
         # add text labels
         # self.set_labels(title, kws.axes_labels,
         #                kws.twinx, relative_time)
-
-        # for lim in (self.xlim, self.ylim):
-        #     lim += np.multiply([-1, 1], (np.ptp(lim) * kws.whitespace / 2))
-
-        # set auto-scale limits
-        # print('setting lims: ', self.ylim)
-        for xy in 'xy':
-            lim = getattr(self, f'{xy}lim')
-            lim = np.where(np.isfinite(lim), lim, [None, None])
-            # print(lim)
-            self.ax.set(**{f'{xy}lim': lim})
-            # else:
-
-        # xlim=self.xlim, ylim=self.ylim,
-        # ax.set(xscale=self.kws.xscale, yscale=self.kws.yscale)
-
-        # self.set_axes_limits(data, kws.whitespace, (kws.xscale, kws.yscale),
-        #                     kws.offsets)
 
         # -------------------------------------------------------------------- #
         # Setup canvas interaction
@@ -620,7 +587,6 @@ class TimeSeriesPlot(LoggingMixin):
         if draggable and not show_hist:
             # FIXME: maybe warn if both draggable and show_hist
             # make the artists draggable
-
             self.plots = MovableErrorbar(self.art, offsets=offsets,
                                          linked=self._linked,
                                          **styles.legend)
@@ -633,27 +599,40 @@ class TimeSeriesPlot(LoggingMixin):
         return self
 
     plot = __call__
-    
-    def get_data(self, data):
-        if data:
-            return data
 
-        if self.parent is not None:
-            return tuple(self.parent)
+    def setup_figure(self, ax, show_hist, **kws):
+        """Setup figure geometry"""
 
-        raise ValueError('Please provide data to plot.')
+        if ax is None:
+            self.xlim = np.array([np.inf, -np.inf])
+            self.ylim = np.array([np.inf, -np.inf])
+        # else:
 
-    def errorbar(self, x, y, y_err, x_err, label,
-                 show_masked=False, show_hist=False, relative_time=False,
-                 max_points=None, thin=1,
-                 styles=None):
+        # get / create figure, axes
+        fig, ax = get_axes(ax, kws.pop('figsize', None))
+
+        # Add subplot for histogram
+        # FIXME: leave space on the right of axes for offsets if draggable
+        hax = None
+        if show_hist:
+            divider = make_axes_locatable(ax)
+            hax = divider.append_axes('right', size='25%', pad=0.,
+                                      sharey=ax)
+            hax.grid()
+            hax.yaxis.tick_right()
+
+        # Set axes props
+        ax.grid()            # which='both' b=True
+        ax.set(**kws)
+
+        return fig, ax, hax
+
+    def plot(self, x, y, y_err, x_err, label, thin=1,
+             show_masked=False, show_hist=False, relative_time=False,
+             styles=None, **kws):
 
         # if (y_err is not None) & (show_errors == 'contour'):
         #     uncertainty_contours(self.ax, x, y, y_err, styles, lw=1)
-
-        # NOTE: masked array behaves badly in mpl < 1.5.
-        # see: https://github.com/matplotlib/matplotlib/issues/5016/
-        # x = x.filled(np.nan)
 
         # clean
         data = sanitize_data(x, y, y_err, x_err)
@@ -662,14 +641,22 @@ class TimeSeriesPlot(LoggingMixin):
         if (thin := int(thin)) > 1:
             data = _thinner(thin, *data)
 
-        # plot errorbars
-        ebar = self.ax.errorbar(*data,
-                                label=label, zorder=self.zorder0,
-                                **styles.errorbar)
-        self.art.append(ebar)
+        # plot
+        kws = dict(label=(label or None), zorder=self.zorder0, **kws)
+        if len(y_err) or len(x_err):
+            # plot errorbars
+            art = self.ax.errorbar(*data, **{**kws, **styles.errorbar})
+        else:
+            # plot line
+            art = self.ax.plot(*data[:2], **{**kws, **styles.line})
 
+        # collect art
+        self.art.append(art)
+
+        # update axes limits
         self.set_limits(*data)
 
+        # time axes offet
         if relative_time:
             self.ax.xaxis.major.formatter.set_useOffset(x[0])
             self.ax.xaxis.set_major_locator(OffsetLocator())
@@ -678,13 +665,14 @@ class TimeSeriesPlot(LoggingMixin):
         if show_masked:
             self.plot_masked_points(x, y, show_masked)
 
-        # Histogram
+        # plot histograms
         if show_hist:
             self.plot_histogram(y, **styles.hist)
 
+        # update zorder for future plots to be behind first
         self.zorder0 = 1
 
-        return ebar
+        return art
 
     def plot_masked_points(self, t, signal, marker='x', color=None, **kws):
         # Get / Plot GTIs
@@ -720,13 +708,11 @@ class TimeSeriesPlot(LoggingMixin):
 
     def set_limits(self, x, y, y_err, x_err):
         # set axes view limits
-
         for xy, v, p, e in zip('xy', (x, y), self.plims, (x_err, y_err)):
             datalim = get_percentiles(v, p, e)
             current = getattr(self, f'{xy}lim')
             low, hi = zip(datalim, current)
             new_lim = [min(low), max(hi)]
-            self.logger.debug('plims = {}, lim = {}', p, new_lim)
 
             # check compat with scale,
             scale = getattr(self.ax, f'get_{xy}scale')()
@@ -745,6 +731,7 @@ class TimeSeriesPlot(LoggingMixin):
                     new_lim[0] = y[~neg].min()
 
             # set new limits
+            self.logger.debug('plims = {}, lim = {}', p, new_lim)
             setattr(self, f'{xy}lim', new_lim)
 
     def set_labels(self, title, axes_labels, twinx, relative_time, t0=''):
@@ -781,7 +768,7 @@ class TimeSeriesPlot(LoggingMixin):
     def acf(self, *data, **kws):
         data = self.get_data(data)
 
-        self.plims = np.array([(-0.1, 100.1), (-0.1, 100.1)])
+        self.plims = np.array([(-0.1, 100.1), (-0.2, 100)])
         tsp = self.plot(*data,
                         errorbar={'ms': 1},
                         **kws)
