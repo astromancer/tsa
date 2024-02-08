@@ -3,9 +3,9 @@ Time series objects
 """
 
 # std
-import numbers
-import operator
 import warnings
+import numbers as nr
+import operator as op
 import itertools as itt
 
 # third-party
@@ -13,12 +13,14 @@ import numpy as np
 from scipy.signal import correlate
 
 # local
-from recipes.functionals import echo
+from recipes.flow import Emit
 from recipes.concurrent import Executor
 from recipes.logging import LoggingMixin
 from recipes.oo.property import CachedProperty
 
 # relative
+from ..smoothing import KernelSmoother, tv
+from .interface import Interface
 from .plotting import TimeSeriesPlot
 
 
@@ -37,8 +39,21 @@ from .plotting import TimeSeriesPlot
 
 # ---------------------------------------------------------------------------- #
 
+# def mean(x, w):
+#     """Weighted Mean"""
+#     return np.ma.average(x, w)
 
-class ACFDirect(Executor):
+# def cov(x, y, w):
+#     """Weighted Covariance"""
+#     return np.ma.average((x - mean(x, w)) * (y - mean(y, w)), w)
+
+# def corr(x, y, w):
+#     """Weighted Correlation"""
+#     return cov(x, y, w) / np.sqrt(cov(x, x, w) * cov(y, y, w))
+
+# ---------------------------------------------------------------------------- #
+
+class ACFDirectCompute(Executor):
     def compute(self, data, index, **kws):
         i, j = index
         r = _lag_acor_norm(data[i], j + 1)
@@ -58,11 +73,19 @@ def _acf_direct(x, max_lag, njobs=-1, backend='multiprocessing'):
     x = x[(..., *[np.newaxis] * (x.ndim == 1))].T
     indices = itt.product(range(len(x)), range(max_lag))
 
-    task = ACFDirect(backend=backend)
+    task = ACFDirectCompute(backend=backend)
     task.init_memory((len(x), max_lag))
     task.run(x, indices, njobs)
 
     return np.ma.MaskedArray(task.results, np.isnan(task.results))
+
+
+def quadnorm(a):
+    return np.ma.sqrt((a ** 2).sum())
+
+
+def quadmean(a):
+    return quadnorm(a) / (~a.mask).sum()
 
 
 # ---------------------------------------------------------------------------- #
@@ -146,6 +169,7 @@ class TimeSeries(LoggingMixin):
     #  Not supported
     #  - units.  Make sure you use compatible units when doing arithmetic
 
+    # Interfaces
     # ------------------------------------------------------------------------ #
     plot = TimeSeriesPlot(xlabel='Time (s)',
                           ylabel='Signal')
@@ -196,9 +220,6 @@ class TimeSeries(LoggingMixin):
         #     # data represented internally as unumpy.uarray
         #     self._x = unp.uarray(x, u)
 
-        if self.m == 3:
-            raise RuntimeError
-
     @staticmethod
     def _parse_init_args(t_or_x, x=None, u=None):
         # signals only
@@ -209,9 +230,8 @@ class TimeSeries(LoggingMixin):
         # times & signals given
         return t_or_x, x, u
 
-    # Properties
+    # Time
     # ------------------------------------------------------------------------ #
-
     @property
     def t(self):
         return self._t
@@ -226,23 +246,40 @@ class TimeSeries(LoggingMixin):
         self._check_against_x(t, 'time')
         self._t = t
 
+    # Data
+    # ------------------------------------------------------------------------ #
     @property
     def x(self):
-        return self._x
+        return self._x  # .squeeze()
 
     @x.setter
     def x(self, x):
         # make sure we have masked array
-        self._x = np.ma.array(x)
-        # .squeeze()
-        # if x.ndim != 1:
-        #     raise ValueError(f'Time Series data should be 1D, not {x.ndim}')
+        x = np.ma.array(x, ndmin=2)
+        if (x.ndim < 1) | (x.ndim > 2):
+            raise ValueError(f'Time Series data should be 1D or 2D '
+                             f'(multivariate case) not {x.ndim}.')
 
-        # self._x = np.ma.array(x)
+        # make sure variate index in last position
+        if 1 in x.shape and len(x) == 1:
+            x = x.T
 
+        self._x = x
+
+        # delete cached stats
         del self.mean
         del self.var
 
+    def _check_against_x(self, vector, name):
+        n, m = len(self), len(vector)
+        if m != n:
+            raise ValueError(
+                f'Unequal number of points between data `x` ({n=}) and {name} `'
+                f'{name[0]}` ({m=}) vectors.'
+            )
+
+    # Uncertainty
+    # ------------------------------------------------------------------------ #
     @property
     def u(self):
         return self._u
@@ -259,14 +296,7 @@ class TimeSeries(LoggingMixin):
             raise ValueError('Cannot have negative uncertainties.')
         self._u = u
 
-    def _check_against_x(self, vector, name):
-        n, m = len(self), len(vector)
-        if m != n:
-            raise ValueError(
-                f'Unequal number of points between data `x` ({n=}) and {name} `'
-                f'{name[0]}` ({m=}) vectors.'
-            )
-
+    # ------------------------------------------------------------------------ #
     @property
     def n(self):
         """Number of data points."""
@@ -275,21 +305,19 @@ class TimeSeries(LoggingMixin):
     @property
     def m(self):
         """Number of variates (time series)."""
-        return 1 if self.x.ndim == 1 else self.x.shape[1]
+        return self._x.shape[1]
 
     # ------------------------------------------------------------------------ #
-
     def __repr__(self):
         return f'{type(self).__name__}(n={self.n:d})'  # .replace(',', ' ')
 
     def __getitem__(self, key):
-        data = self.x[key]
-        kls = TimeSeries if len(data) else echo
+        data = self._x[key]
+        kls = TimeSeries if len(data) else tuple
         return kls(None if self.t is None else self.t[key],
                    data,
                    None if self.u is None else self.u[key])
 
-    #
     # ------------------------------------------------------------------------ #
     def __len__(self):
         return len(self._x)
@@ -300,7 +328,37 @@ class TimeSeries(LoggingMixin):
 
     # arithmetic
     # --------------------------------------------------------------------------
-    def _arithmetic(self, other, op):
+    def __array__(self, *args, **kws):
+        return self._x
+
+    def __pos__(self):
+        return self
+
+    def __neg__(self):
+        # pylint: disable=invalid-unary-operand-type
+        return self.__class__(self.t, -self.x, self.u)
+
+    def __abs__(self):
+        return self.__class__(self.t, abs(self.x), self.u)
+
+    def __add__(self, other):
+        return self._arithmetic(other, op.add)
+
+    def __sub__(self, other):
+        return self._arithmetic(other, op.sub)
+
+    def __mul__(self, other):
+        return self._arithmetic(other, op.mul)
+
+    def __truediv__(self, other):
+        return self._arithmetic(other, op.truediv)
+
+    __radd__ = __add__
+    __rsub__ = __sub__
+    __rmul__ = __mul__
+    __rtruediv__ = __truediv__
+
+    def _arithmetic(self, other, operator):
         #
         if isinstance(other, TimeSeries):
             # Can only really do time series if they are simultaneous
@@ -309,44 +367,18 @@ class TimeSeries(LoggingMixin):
                                  f' different sizes not permitted')
 
             # TODO: propagate uncertainties!
-            return self.__class__(self.t, op(self.x, other.x), self.u)
+            return self.__class__(self.t, operator(self.x, other.x), self.u)
 
         # arithmetic with complex numbers not supported
-        if isinstance(other, numbers.Complex) and not isinstance(other, numbers.Real):
+        if isinstance(other, nr.Complex) and not isinstance(other, nr.Real):
             raise TypeError('Arithmetic with complex numbers not currently '
                             'supported.')
             # all other number types should be OK
 
         # array-like (any object that can create an array / any duck-type array)
         other = np.asanyarray(other)
-        return self.__class__(self.t, op(self._x, other), self.u)
-
-    def __pos__(self):
-        return self
-
-    def __neg__(self):
-        # pylint: disable=invalid-unary-operand-type
-        return self.__class__(self.t, -self.x)
-
-    def __abs__(self):
-        return self.__class__(self.t, abs(self.x))
-
-    def __add__(self, other):
-        return self._arithmetic(other, operator.add)
-
-    def __sub__(self, other):
-        return self._arithmetic(other, operator.sub)
-
-    def __mul__(self, other):
-        return self._arithmetic(other, operator.mul)
-
-    def __truediv__(self, other):
-        return self._arithmetic(other, operator.truediv)
-
-    __radd__ = __add__
-    __rsub__ = __sub__
-    __rmul__ = __mul__
-    __rtruediv__ = __truediv__
+        warnings.warn('Uncertainties not propagated!')
+        return self.__class__(self.t, operator(self.x, other), self.u)
 
     # element-wise comparison
     # object.__lt__(self, other)
@@ -371,7 +403,6 @@ class TimeSeries(LoggingMixin):
     # object.__and__(self, other)
     # object.__xor__(self, other)
     # object.__or__(self, other)
-    #
     #
     # object.__radd__(self, other)
     # object.__rsub__(self, other)
@@ -408,6 +439,7 @@ class TimeSeries(LoggingMixin):
     # object.__floor__(self)
     # object.__ceil__(self)
 
+    # Statistics
     # ------------------------------------------------------------------------ #
     @CachedProperty
     def mean(self):
@@ -427,11 +459,10 @@ class TimeSeries(LoggingMixin):
         return np.sqrt(self.var)
 
     # ------------------------------------------------------------------------ #
-
     def copy(self):
         return type(self)(*self)
 
-    def append(self, ts):
+    def extend(self, ts):
 
         if isinstance(ts, tuple):
             ts = type(self)(*ts)
@@ -444,20 +475,97 @@ class TimeSeries(LoggingMixin):
         if self.u is not None:
             self.u = np.hstack([self.u, ts.u])
 
+    # Transformations
     # ------------------------------------------------------------------------ #
-    def periodogram(self, window=None, detrend=None, pad=None, normalize=None):
+    def normalize(self, loc='mean', scale='std', t0=0, tscale='ptp'):
+
+        y = self.x
+        v = self.u
+
+        if loc not in {None, False}:
+            loc = self._resolve_stat(loc, 'mean')
+            y = y - loc
+
+        if scale:
+            scale = self._resolve_stat(scale, 'std')
+            y = y / scale
+
+            if v is not None:
+                v = v / scale
+
+        t = self.t
+        if not (t0 is None or t0 is False):  # or (tscale != 1)
+            t0 = t[t0] if isinstance(t0, int) else float(t0)
+            t = t - t0
+
+        if tscale:
+            if isinstance(tscale, str):
+                tscale = getattr(np.ma, tscale)(t)
+            t = t / float(tscale)
+
+        return type(self)(t, y, v)
+
+    def _resolve_stat(self, stat, default):
+        if stat is True:
+            stat = default
+
+        if isinstance(stat, str):
+            stat = getattr(self, stat)
+
+        if isinstance(stat, (nr.Number, np.ndarray)):
+            return stat
+
+        if callable(stat):
+            return stat(self.y)
+
+        raise TypeError(f'Numeric input required for {default!r}.')
+
+    def compressed(self):
+        if np.ma.is_masked(self.x):
+            return self
+
+        return self[self.x.mask.any(axis=-1)]
+
+    def impute(self, n=10, method=np.ma.median, emit='silent'):
+        s = n // 2
+        x = self.x
+        r, c = x.mask.nonzero()
+        y = np.ma.empty(x.shape)
+        u = None if self.u is None else np.ma.empty(self.u.shape)
+        for i in range(self.m):
+            bad = r[c == i]
+            segments = list(map(slice, *(bad + [[-s], [s + 1]])))
+            y[ok, i] = x[(ok := ~x[:, i].mask), i]
+            y[bad, i] = [method(x[seg, i]) for seg in segments]
+
+            if self.u is None:
+                continue
+
+            u[ok, i] = self.u[ok, i]
+            u[bad, i] = [quadmean(self.u[seg, i]) for seg in segments]
+
+        #
+        Emit(emit)('Imputing masked data with sample mean from neighbourhood '
+                   'n = {}.', n)
+
+        return type(self)(self.t, y, u)
+
+    # Spectral estimators
+    # ------------------------------------------------------------------------ #
+
+    def periodogram(self, window=None, detrend=None, pad=None, normalize=None, **kws):
         from tsa.spectral import Periodogram
 
-        return Periodogram(self.t, self.x, window, detrend, pad, normalize)
+        return Periodogram(self.t, self.x, window, detrend, pad, normalize, **kws)
 
     def spectrogram(self, nwindow, noverlap=0, window='hanning', detrend=None,
-                    pad=None, split=None, normalize=False):
+                    pad=None, split=None, normalize=False, **kws):
         from tsa.spectral import Spectrogram
 
         return Spectrogram(self.t, self.x,
                            nwindow, noverlap,
                            window, detrend,
-                           pad, split, normalize)
+                           pad, split, normalize, **kws)
 
     def correlogram(self, max_lag=None, method=None, njobs=-1):
 
@@ -473,19 +581,16 @@ class TimeSeries(LoggingMixin):
         t = self.t[:top] - self.t[0]
 
         self.logger.info('Computing Auto-correlation spectrum via {} method.', method)
-        x = self.normalize().x
-        
+        sv = self.normalize()
+
         if method == 'direct':
-            return type(self)(t, _acf_direct(x, max_lag, njobs).T)
-    
+            return type(self)(t, _acf_direct(sv.x, max_lag, njobs).T)
+
         # FFT method
+        x = sv.impute(emit='warning').x
         v = np.ma.empty((self.m, max_lag))
         for i, x in enumerate(x[(..., *[np.newaxis] * (self.m == 1))].T):
-            if np.ma.is_masked(x):
-                warnings.warn('Imputing masked data with sample mean.')
-                y = x.filled(x.mean())
-
-            c = correlate(y, y, 'full')
+            c = correlate(x, x, 'full')
             v[i] = c[self.n - 1:]
 
         # normalize
@@ -494,22 +599,7 @@ class TimeSeries(LoggingMixin):
 
     acf = correlogram
 
-    def normalize(self, loc=True, scale=True):
-
-        y = self.x
-        v = self.u
-
-        if loc:
-            y = y - self.mean
-
-        if scale:
-            y = y / self.std
-
-            if v is not None:
-                v = v / self.std
-
-        return type(self)(self.t, y, v)
-
+    # ------------------------------------------------------------------------ #
     # def fold(self, eph):
 
 
@@ -523,16 +613,21 @@ class MultiVariateTimeSeries(TimeSeries):
         return f'{type(self).__name__}(n={self.n:d}, m={self.m:d})'
 
     def __getitem__(self, key):
+        if isinstance(key, int):
+            key = (..., key)
+
         if not isinstance(key, tuple):
             return super().__getitem__(key)
 
         # select variate
         key, m = key
         data = self.x[key, m]
-        kls = TimeSeries if len(data) else echo
+        kls = TimeSeries if len(data) else tuple
         return kls(None if self.t is None else self.t[key],
                    data,
                    None if self.u is None else self.u[key, m])
+
+    # def __iter__(self):
 
 
 # alias
