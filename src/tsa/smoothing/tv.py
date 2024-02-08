@@ -28,7 +28,7 @@ from recipes.concurrent import Executor
 
 # ---------------------------------------------------------------------------- #
 # Even the spare matrix implimentation has limits
-MAX_ARRAY_SIZE = 2e3
+MAX_ARRAY_SIZE = 5000
 
 # ---------------------------------------------------------------------------- #
 
@@ -53,7 +53,7 @@ class WindowSmoother(Executor):
     # def __repr__(self):
     #     return f'{type(self).__name__}()'
 
-    def __call__(self, t, x, amount=None, njobs=-1):
+    def __call__(self, t, x, smoothing=None, njobs=-1):
 
         x = np.asanyarray(x).squeeze()
         n = len(x)
@@ -69,27 +69,30 @@ class WindowSmoother(Executor):
             raise ValueError(
                 'Window overlap should be less than half window size for TVR.'
             )
+        if noverlap == 0:
+            logger.warning('Overlap is recommended to avoid edge effects.')
 
-        half_overlap = noverlap // 2
-
+        # Fold arrays
         tf = fold.fold(t, nwindow, noverlap)
         data = fold.fold(x, nwindow, noverlap)
         nsegs = tf.shape[0]
 
-        if amount:
-            amount *= n / nwindow
+        if smoothing:
+            smoothing *= (n / nwindow) ** 3
 
         masked = np.ma.is_masked(x) | np.ma.is_masked(t)
         self.init_memory((nsegs, nwindow), masked)
-        self.run(zip(tf, data), λs=amount, njobs=njobs)
+        self.run(zip(tf, data), λs=smoothing, njobs=njobs)
 
         results = np.ma.MaskedArray(self.results, self.mask)
 
         if noverlap:
             # concatenate
+            start, odd = divmod(noverlap, 2)
+            end = -(start + odd)
             return np.ma.hstack([
-                results[0, :-half_overlap],
-                results[1:, half_overlap:-half_overlap].ravel(),
+                results[0, :end],
+                results[1:, start:end].ravel(),
             ])[:n]
         else:
             return self.results.reshape(-1)
@@ -98,14 +101,14 @@ class WindowSmoother(Executor):
         return smooth(*data, **kws)
 
 
-def _check_arrays(x, y):
+def _check_arrays(x, y, size_limit=MAX_ARRAY_SIZE):
     y = np.asanyarray(y).squeeze()
     if y.ndim != 1:
         raise ValueError(f'Input data should be 1D not {y.ndim}D.')
 
-    if (n := y.size) > MAX_ARRAY_SIZE:
+    if (n := y.size) > size_limit:
         raise ValueError(
-            f'Array too large: {n} > {MAX_ARRAY_SIZE}. This is here to prevent '
+            f'Array too large: {n} > {size_limit}. This is here to prevent '
             'memory overflow during the optimization. For large arrays you may '
             'wish to usethe `tv.WindowSmoother` class to smooth the time '
             'sereis segment by segment.'
@@ -191,7 +194,6 @@ def _smooth(x, y, λs, d=2):
     -------
 
     """
-    logger.debug(f'{λs = }')
 
     n = len(y)
     D_ = D(x, d)
@@ -206,7 +208,7 @@ def _smooth(x, y, λs, d=2):
     return inv(csc_matrix(eye(n) + λ * (D_.T @ U @ D_))) @ y
 
 
-def smooth_optimal(x, y, λ0=1, d=2):
+def smooth_optimal(x, y, d=2):
     """
     Optimal Total Variational smoothing. Optimal smoothing value is found by
     minimizing cross-validation variance.
@@ -224,53 +226,57 @@ def smooth_optimal(x, y, λ0=1, d=2):
     -------
 
     """
-
+    
+    x, y = _check_arrays(x, y)
+    
     if not (np.ma.is_masked(x) | np.ma.is_masked(y)):
         return _smooth_optimal(x, y, d)
 
     # handle masked
     ok = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
     yhat = np.ma.empty(y.shape)
-    yhat[ok], λopt = _smooth_optimal(x[ok], y.data[ok], λ0, d)
+    yhat[ok], λopt = _smooth_optimal(x[ok], y.data[ok], d)
     yhat[~ok] = np.ma.masked
     return yhat, λopt
 
 
-def _smooth_optimal(x, y, λ0=1, d=2):
+def _smooth_optimal(x, y, d=2):
     # Solve for optimal smoothing parameter λs. That is minimize
     # cross-validation variance
 
-    # rescale x
-    # scale = (x[-1] - x[0])
-    # x = (x - x[0]) / scale
+    # rescale x (for numerical stability)
+    xscale = (x[-1] - x[0])
+    x = (x - x[0]) / xscale
 
     n = len(y)
     I = eye(n)
     D_ = D(x, d)
     R = D_.T @ D_
-    # scale factor for smoothing parameter
-    δ = R.trace() / n ** (d + 2)
 
+    # scale factor for smoothing parameter
+    δ = R.trace() / n ** (d + 2) 
+    
     # integral estimate
     i0, i1 = int(np.ceil(d / 2)), int(np.floor(d / 2))
     U = B(x)[i0:-i1, i0:-i1]
 
-    # if λ0 is None:
-    #     λ0 = 1#x.size / x.ptp()
-    # else:
-    #     λ0 = float(λ0)
-
-    assert λ0 > 0
-
-    # λs0 = λ0
-
-    result = minimize(_objective, λ0 / δ, (y, I, D_, R, U), 'Nelder-Mead')
+    # assert λ0 > 0
+    λs0 = 1 / δ
+    logger.opt(lazy=True).info(
+        '{}', lambda: f'Minimize starting at {λs0 = :.3g} ({δ = :.3g}) {xscale = :.3g}'
+    )
+    #
+    result = minimize(_objective, λs0, (y, I, D_, R, U), 'Nelder-Mead',
+                      bounds=[(0, None)])
 
     if result.success:
         λopt = result.x.item()
+        logger.success('Converged: λ = {}', λopt)
         yhat = inv(csc_matrix(I + λopt * (D_.T @ U @ D_))) @ y
-        λ = λopt * δ
-        logger.success('Converged: λ = {}', λ)
+        
+        # rescale result back to input coordinate scale
+        λ = λopt * δ / xscale
+
         return yhat, λ
 
     raise ValueError(f'Optimization unsuccessful: {result.message!r}.')

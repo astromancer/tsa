@@ -53,6 +53,27 @@ from .plotting import TimeSeriesPlot
 
 # ---------------------------------------------------------------------------- #
 
+def _resolve_stat(stat, obj, lookup, *args):
+    if stat is True:
+        stat = lookup
+
+    if isinstance(stat, str):
+        stat = getattr(obj, stat)
+
+    if isinstance(stat, (nr.Number, np.ndarray)):
+        return stat
+
+    if callable(stat):
+        return stat(*args)
+
+    # 
+    raise TypeError(
+        f'Numeric input required for {lookup!r}, not {type(stat).__name__}.'
+    )
+
+
+# ---------------------------------------------------------------------------- #
+
 class ACFDirectCompute(Executor):
     def compute(self, data, index, **kws):
         i, j = index
@@ -113,7 +134,7 @@ class Smoothing(Interface):
         if (m := x.shape[1]) > 1:
             self.logger.debug('Looping over {} variates.', m)
 
-        optima = []
+        self.optima = []
         for i, xx in enumerate(x.T):
             smoother.jobname = f'{name} ({i + 1}/{m})'
             self.logger.debug('Running {} with njobs={} on {} array, λ = {}.',
@@ -123,11 +144,10 @@ class Smoothing(Interface):
             if amount:
                 y[:len(result), i] = result
             else:
-                y[:len(result), i], optimum = result
-                optima.append(optimum)
+                result, optimum = result
+                y[:len(result), i] = result
+                self.optima.append(optimum)
 
-        if optima:
-            'TODO: set as meta data'
         #     return y, np.reshape(optima, (-1, i + 1))
 
         return TimeSeries(t, y)
@@ -483,11 +503,11 @@ class TimeSeries(LoggingMixin):
         v = self.u
 
         if loc not in {None, False}:
-            loc = self._resolve_stat(loc, 'mean')
+            loc = _resolve_stat(loc, self, 'mean')
             y = y - loc
 
         if scale:
-            scale = self._resolve_stat(scale, 'std')
+            scale = _resolve_stat(scale, self, 'std')
             y = y / scale
 
             if v is not None:
@@ -499,26 +519,11 @@ class TimeSeries(LoggingMixin):
             t = t - t0
 
         if tscale:
-            if isinstance(tscale, str):
-                tscale = getattr(np.ma, tscale)(t)
+            tscale = _resolve_stat(tscale, np.ma, 'ptp', self.t)
             t = t / float(tscale)
 
         return type(self)(t, y, v)
 
-    def _resolve_stat(self, stat, default):
-        if stat is True:
-            stat = default
-
-        if isinstance(stat, str):
-            stat = getattr(self, stat)
-
-        if isinstance(stat, (nr.Number, np.ndarray)):
-            return stat
-
-        if callable(stat):
-            return stat(self.y)
-
-        raise TypeError(f'Numeric input required for {default!r}.')
 
     def compressed(self):
         if np.ma.is_masked(self.x):
