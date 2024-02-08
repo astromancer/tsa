@@ -7,7 +7,8 @@ Source:
 See also:
     Appendix A; Lubansky+ (2006)
     
-Functions in this module are named after the variables in the Stickel (2011) paper.
+Functions in this module are named after the variables in the Stickel (2011)
+paper.
 """
 
 # std
@@ -15,19 +16,118 @@ import numbers
 
 # third-party
 import numpy as np
-from scipy import sparse
+from loguru import logger
 from scipy.optimize import minimize
+from scipy.sparse.linalg import inv
+from scipy.sparse import csc_matrix, eye, lil_matrix
+
+# local
+from recipes.array import fold
+from recipes.concurrent import Executor
 
 
-def _sanitize(x, y):
-    # remove masked points
-    good = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
-    return np.ma.getdata(x[good]), np.ma.getdata(y[good])
+# ---------------------------------------------------------------------------- #
+# Even the spare matrix implimentation has limits
+MAX_ARRAY_SIZE = 2e3
+
+# ---------------------------------------------------------------------------- #
+
+
+# def _sanitize(x, y):
+#     # remove masked points
+#     ok = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
+#     return np.ma.getdata(x[ok]), np.ma.getdata(y[ok])
+
+
+class WindowSmoother(Executor):
+
+    __slots__ = ('nwindow', 'noverlap')
+
+    def __init__(self, nwindow, noverlap='25%',
+                 jobname=None, backend='multiprocessing', **kws):
+
+        self.nwindow = nwindow
+        self.noverlap = noverlap
+        super().__init__(jobname, backend, **kws)
+
+    # def __repr__(self):
+    #     return f'{type(self).__name__}()'
+
+    def __call__(self, t, x, amount=None, njobs=-1):
+
+        x = np.asanyarray(x).squeeze()
+        n = len(x)
+        assert x.ndim == 1
+        if t is None:
+            t = np.arange(n)
+        else:
+            assert len(t) == n
+
+        nwindow = fold.resolve_size(self.nwindow, n)
+        noverlap = fold.resolve_size(self.noverlap, nwindow)
+        if noverlap > nwindow // 2:
+            raise ValueError(
+                'Window overlap should be less than half window size for TVR.'
+            )
+
+        half_overlap = noverlap // 2
+
+        tf = fold.fold(t, nwindow, noverlap)
+        data = fold.fold(x, nwindow, noverlap)
+        nsegs = tf.shape[0]
+
+        if amount:
+            amount *= n / nwindow
+
+        masked = np.ma.is_masked(x) | np.ma.is_masked(t)
+        self.init_memory((nsegs, nwindow), masked)
+        self.run(zip(tf, data), λs=amount, njobs=njobs)
+
+        results = np.ma.MaskedArray(self.results, self.mask)
+
+        if noverlap:
+            # concatenate
+            return np.ma.hstack([
+                results[0, :-half_overlap],
+                results[1:, half_overlap:-half_overlap].ravel(),
+            ])[:n]
+        else:
+            return self.results.reshape(-1)
+
+    def _compute(self, data, **kws):
+        return smooth(*data, **kws)
+
+
+def _check_arrays(x, y):
+    y = np.asanyarray(y).squeeze()
+    if y.ndim != 1:
+        raise ValueError(f'Input data should be 1D not {y.ndim}D.')
+
+    if (n := y.size) > MAX_ARRAY_SIZE:
+        raise ValueError(
+            f'Array too large: {n} > {MAX_ARRAY_SIZE}. This is here to prevent '
+            'memory overflow during the optimization. For large arrays you may '
+            'wish to usethe `tv.WindowSmoother` class to smooth the time '
+            'sereis segment by segment.'
+        )
+
+    if x is None:
+        x = np.arange(n)
+    else:
+        x = np.asanyarray(x).squeeze()
+        if x.ndim != 1:
+            raise ValueError(f'Input data should be 1D not {y.ndim}D.')
+
+        if x.size != n:
+            raise ValueError('Input vectors should be the same size: '
+                             f'({len(x) = }) != ({len(y) = })')
+
+    return x, y
 
 
 def smooth(x, y=None, λs=None, d=2):
     """
-    Total Variation Regularization based smoothing
+    Total Variation Regularization (TVR) smoothing
 
     Parameters
     ----------
@@ -46,29 +146,33 @@ def smooth(x, y=None, λs=None, d=2):
     """
     if (y is None) or isinstance(y, numbers.Real):
         # single vector input mode
-        λs, y = y, x
-        x = np.arange(len(y))
-    else:
-        x, y = map(np.asanyarray, (x, y))
+        x, y, λs = None, x, y
 
-    #
+    # sanitize
+    x, y = _check_arrays(x, y)
+
     if λs is None:
         # optimal λ search
         # yhat, λopt = smooth_optimal(x, y, d)
-        return smooth_optimal(x, y, d)
+        return smooth_optimal(x, y, d=d)
 
     if isinstance(λs, numbers.Real):
         if np.ma.is_masked(x) | np.ma.is_masked(y):
-            good = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
+            # handle masked data
             out = np.ma.empty(y.shape)
-            out[good] = _smooth(x[good], y[good], λs, d)
-            out[~good] = np.ma.masked
+            ok = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
+            out[ok] = _smooth(x[ok], y[ok], λs, d)
+            out[~ok] = np.ma.masked
             return out
 
         return _smooth(x, y, λs, d)
 
-    raise ValueError(f'Invalid smoothing parameter: {λs}. Should be a real'
-                     ' number, or None for optimal smoothing.')
+    raise ValueError(f'Invalid smoothing parameter: {λs = }. Should be a real'
+                     ' number, or `None` for optimal smoothing.')
+
+
+# alias
+smoother = smooth
 
 
 def _smooth(x, y, λs, d=2):
@@ -87,6 +191,7 @@ def _smooth(x, y, λs, d=2):
     -------
 
     """
+    logger.debug(f'{λs = }')
 
     n = len(y)
     D_ = D(x, d)
@@ -98,10 +203,10 @@ def _smooth(x, y, λs, d=2):
     U = B(x)[i0:-i1, i0:-i1]
 
     # solve
-    return sparse.linalg.inv(sparse.csc_matrix(sparse.eye(n) + λ * (D_.T @ U @ D_))) @ y
+    return inv(csc_matrix(eye(n) + λ * (D_.T @ U @ D_))) @ y
 
 
-def smooth_optimal(x, y, d=2):
+def smooth_optimal(x, y, λ0=1, d=2):
     """
     Optimal Total Variational smoothing. Optimal smoothing value is found by
     minimizing cross-validation variance.
@@ -111,6 +216,8 @@ def smooth_optimal(x, y, d=2):
     ----------
     x
     y
+    λ0=1
+        seems to be a good initial choice
     d
 
     Returns
@@ -118,21 +225,27 @@ def smooth_optimal(x, y, d=2):
 
     """
 
-    if not np.ma.is_masked(x) | np.ma.is_masked(y):
-        return _smooth_optimal(x, y.data, d)
+    if not (np.ma.is_masked(x) | np.ma.is_masked(y)):
+        return _smooth_optimal(x, y, d)
 
-    good = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
+    # handle masked
+    ok = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
     yhat = np.ma.empty(y.shape)
-    yhat[good], λopt = _smooth_optimal(x[good], y.data[good], d)
-    yhat[~good] = np.ma.masked
+    yhat[ok], λopt = _smooth_optimal(x[ok], y.data[ok], λ0, d)
+    yhat[~ok] = np.ma.masked
     return yhat, λopt
 
 
-def _smooth_optimal(x, y, d=2, ):
+def _smooth_optimal(x, y, λ0=1, d=2):
     # Solve for optimal smoothing parameter λs. That is minimize
     # cross-validation variance
+
+    # rescale x
+    # scale = (x[-1] - x[0])
+    # x = (x - x[0]) / scale
+
     n = len(y)
-    I = sparse.eye(n)
+    I = eye(n)
     D_ = D(x, d)
     R = D_.T @ D_
     # scale factor for smoothing parameter
@@ -142,13 +255,23 @@ def _smooth_optimal(x, y, d=2, ):
     i0, i1 = int(np.ceil(d / 2)), int(np.floor(d / 2))
     U = B(x)[i0:-i1, i0:-i1]
 
-    λs0 = 0.001  # seems to be a good initial choice
-    result = minimize(_objective, λs0 / δ, (y, I, D_, R, U), 'Nelder-Mead')
+    # if λ0 is None:
+    #     λ0 = 1#x.size / x.ptp()
+    # else:
+    #     λ0 = float(λ0)
+
+    assert λ0 > 0
+
+    # λs0 = λ0
+
+    result = minimize(_objective, λ0 / δ, (y, I, D_, R, U), 'Nelder-Mead')
 
     if result.success:
         λopt = result.x.item()
-        yhat = sparse.linalg.inv(sparse.csc_matrix(I + λopt * (D_.T @ U @ D_))) @ y
-        return yhat, (λopt * δ)
+        yhat = inv(csc_matrix(I + λopt * (D_.T @ U @ D_))) @ y
+        λ = λopt * δ
+        logger.success('Converged: λ = {}', λ)
+        return yhat, λ
 
     raise ValueError(f'Optimization unsuccessful: {result.message!r}.')
 
@@ -158,9 +281,9 @@ def _objective(λ, y, I, D_, R, U):
     # variance associated with the smoothness λ
     n = len(y)
     λ = λ.item()  # minimize turns this into an array
-    yhat = sparse.linalg.inv(sparse.csc_matrix(I + λ * R)) @ y
+    yhat = inv(csc_matrix(I + λ * R)) @ y
 
-    H_ = sparse.linalg.inv(sparse.csc_matrix(I + λ * (D_.T @ U @ D_)))
+    H_ = inv(csc_matrix(I + λ * (D_.T @ U @ D_)))
 
     #       rss
     # returns the cross validation variance associated with the smoothness λ
@@ -191,10 +314,10 @@ def D(x, d=1):
     n = len(x)
     # first order derivative estimator (matrix operator)
     δx = np.roll(x, -d)[:-d] - x[:-d]
-    δx[δx == 0] = 1e-9
-    Vd = sparse.lil_matrix((n - d, n - d))
+    δx[δx == 0] = 1e-10                 # numerical stability
+    Vd = lil_matrix((n - d, n - d))
     Vd.setdiag(1 / δx)
-    Dhat1 = sparse.eye(n - d, n - d + 1, 1) - sparse.eye(n - d, n - d + 1)
+    Dhat1 = eye(n - d, n - d + 1, 1) - eye(n - d, n - d + 1)
     dr = d * Vd @ Dhat1
     return dr if d == 1 else dr @ D(x, d - 1)
 
@@ -208,7 +331,7 @@ def B(x):
     B_[1:-1] = np.roll(x, -2)[:-2] - x[:-2]
     B_[-1] = np.diff(x[-2:])
 
-    B = sparse.lil_matrix((n, n))
+    B = lil_matrix((n, n))
     B.setdiag(B_)
     return B
 
@@ -225,8 +348,7 @@ def H(x, λs, d=2):
 
     # rescale smoothness parameter
     δ = np.trace(D_.T @ D_) / len(x) ** (d + 2)
-    I = np.eye(len(x))
-    return sparse.linalg.inv(I + (λs / δ) * (D_.T @ U @ D_))
+    return inv(np.eye(len(x)) + (λs / δ) * (D_.T @ U @ D_))
 
 
 def Vgcv(x, y, yhat, λs):

@@ -66,7 +66,51 @@ def _acf_direct(x, max_lag, njobs=-1, backend='multiprocessing'):
 
 
 # ---------------------------------------------------------------------------- #
+class Smoothing(Interface):
 
+    def __call__(self, x, wsize=11, window='hanning'):
+        return KernelSmoother(window, wsize)(x)
+
+    def tv(self, amount=None, nwindow=None, noverlap=0, njobs=-1):
+
+        t, x, u = self.get_data(())
+        # x = x[(..., *[np.newaxis] * (x.ndim == 1))].T
+        y = np.empty_like(x)
+
+        if nwindow:
+            njobs = (njobs, )
+            smoother = tv.WindowSmoother(nwindow, noverlap)
+            name = 'tv.WindowSmoother'
+        else:
+            # no windowing. might bork for long ts
+            njobs = ()
+            smoother = tv.smooth
+            name = 'tv.smooth'
+
+        if (m := x.shape[1]) > 1:
+            self.logger.debug('Looping over {} variates.', m)
+
+        optima = []
+        for i, xx in enumerate(x.T):
+            smoother.jobname = f'{name} ({i + 1}/{m})'
+            self.logger.debug('Running {} with njobs={} on {} array, λ = {}.',
+                              smoother.jobname, njobs, xx.shape, amount)
+            result = smoother(t, xx, amount, *njobs)
+
+            if amount:
+                y[:len(result), i] = result
+            else:
+                y[:len(result), i], optimum = result
+                optima.append(optimum)
+
+        if optima:
+            'TODO: set as meta data'
+        #     return y, np.reshape(optima, (-1, i + 1))
+
+        return TimeSeries(t, y)
+
+
+# ---------------------------------------------------------------------------- #
 
 class TimeSeries(LoggingMixin):
     """
@@ -105,6 +149,8 @@ class TimeSeries(LoggingMixin):
     # ------------------------------------------------------------------------ #
     plot = TimeSeriesPlot(xlabel='Time (s)',
                           ylabel='Signal')
+
+    smooth = Smoothing()
 
     # ------------------------------------------------------------------------ #
     # Constructors

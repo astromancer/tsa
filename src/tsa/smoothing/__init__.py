@@ -4,8 +4,66 @@ import itertools as itt
 # third-party
 import numpy as np
 
+# local
+from recipes.array.fold import resolve_size
+
 # relative
 from ..windowing import get_window
+from . import tv
+
+
+# ---------------------------------------------------------------------------- #
+class KernelSmoother:
+
+    def __init__(self, window='hanning', size=11):
+        self.window = window
+        self.nwindow = size
+
+    def __call__(self, x):
+        x, wsize = self._check(x, self.nwindow)
+
+        if wsize < 3:
+            # should probably warn
+            return x
+
+        # get window values
+        window = get_window(self.window, wsize)
+
+        # pad array symmetrically at both ends
+        s = np.ma.concatenate([x[wsize - 1:0:-1], x, x[-1:-wsize:-1]])
+
+        # compute lower and upper indices to use such that input array dimensions
+        # equal output array dimensions
+        div, mod = divmod(wsize, 2)
+        if mod:  # i.e. odd window length
+            pl, ph = div, div + mod
+        else:  # even window len
+            pl = ph = div
+
+        # convolve the signal
+        # normalize window
+        y = np.convolve(window / window.sum(), s, mode='valid')
+
+        # return array that has same size as input array
+        return y[pl:-ph + 1]
+
+    def _check(self, x, wsize):
+
+        x = np.asanyarray(x).squeeze()
+
+        if np.ma.is_masked(x):
+            raise ValueError('Smoother does not support working with masked data.')
+
+        if x.ndim != 1:
+            raise ValueError(f'{type(self).__name__} only accepts 1D arrays.')
+
+        # resolve window size
+        wsize = resolve_size(wsize, len(x))
+
+        if x.size < wsize:
+            raise ValueError('Input vector needs to be bigger than window size.')
+
+        return x, wsize
 
 
 def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
@@ -30,16 +88,17 @@ def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
     """
 
     if x.ndim != 1:
-        raise ValueError("smooth only accepts 1 dimension arrays.")
+        raise ValueError('`smoother` only accepts 1D arrays.')
 
     if x.size < wsize:
-        raise ValueError("Input vector needs to be bigger than window size.")
+        raise ValueError('Input vector needs to be bigger than window size.')
 
     if wsize < 3:
+        # should probably warn
         return x
 
     # get the window values
-    windowVals = get_window(window, wsize)  # window values
+    window = get_window(window, wsize)  # window values
 
     # pad array symmetrically at both ends
     s = np.ma.concatenate([x[wsize - 1:0:-1], x, x[-1:-wsize:-1]])
@@ -64,8 +123,8 @@ def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
         s[s.mask] = fillvals
 
     # convolve the signal
-    w = windowVals / windowVals.sum()  # normalize window
-    y = np.convolve(w, s, mode='valid')
+    # normalize window
+    y = np.convolve(window / window.sum(), s, mode='valid')
 
     # return
     if output_masked := (output_masked or np.ma.is_masked(x)):
