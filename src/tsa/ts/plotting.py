@@ -562,9 +562,10 @@ class TimeSeriesPlot(Interface):
         # Plot
         for x, y, σy, σx, label in data:
             # note: errors or times are empty sequences here if not user provided
+            label = kws.pop('label', label or '')
             logger.opt(lazy=True).debug(
-                '{}', lambda: (f'Now plotting {label or ""}:'
-                               f'\n{x = },\n {y = },\n {σy = },\n {σx = }')
+                '{}', lambda: (f'Now plotting {label}:'
+                               f'\n{x = },\n{σx = },\n{y = },\n{σy = }')
             )
 
             self.plot(x, y, σy, σx, label, thin, show_masked, show_hist,
@@ -622,12 +623,12 @@ class TimeSeriesPlot(Interface):
             hax.yaxis.tick_right()
 
         # Set axes props
-        ax.grid()            # which='both' b=True
+        ax.grid(True)
         ax.set(**kws)
 
         return fig, ax, hax
 
-    def plot(self, x, y, y_err, x_err, label, thin=1,
+    def plot(self, x, y, y_err, x_err, label=None, thin=1,
              show_masked=False, show_hist=False, relative_time=False,
              styles=None, **kws):
 
@@ -642,7 +643,7 @@ class TimeSeriesPlot(Interface):
             data = _thinner(thin, *data)
 
         # plot
-        kws = dict(label=(label or None), zorder=self.zorder0, **kws)
+        kws = {**dict(label=(label or None), zorder=self.zorder0), **kws}
         if len(y_err) or len(x_err):
             # plot errorbars
             art = self.ax.errorbar(*data, **{**kws, **styles.errorbar})
