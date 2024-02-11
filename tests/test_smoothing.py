@@ -12,7 +12,8 @@ from loguru import logger
 # local
 from obstools.lc import io
 from tsa.ts import TimeSeries
-from tsa.smoothing import tv
+from tsa.spectral import resolve_overlap
+
 
 logger.enable('recipes')
 
@@ -105,18 +106,34 @@ def test_smoothing_optimal_scaling(loc, scale, tscale):
     # ax.grid(False)
     return fig
 
-    # z, opt = tv.smooth(np.array(tss.x.T[0]))
-    # fig, ax = plt.subplots()
-    # ax.plot(tss.x.T[0], '.', ms=2)
-    # ax.plot(z, '-')
 
-    # tss = ts.smooth.tv(nwindow=1000, noverlap='25%', strength=0.1)
+@pytest.mark.mpl_image_compare(baseline_dir='images/smoothing/windowed')
+def test_smoothing_optimal_windowed():
 
-    # # plot
-    # ts.plot()
-    # tss.plot(errorbar={'ls':'-'})
+    n = 3000
+    nwindow = 250
+    noverlap = 0.25
+    noverlap = resolve_overlap(nwindow, noverlap)
 
-    # plt.show()
+    tss = ts[:n].normalize(loc=False, scale=False)
+    fig, ax = tss.plot(labels=['Data', ''], alpha=0.25)
+
+    # Full solution reference
+    tsv = tss.smooth.tv(None, nwindow, noverlap, λ0=0.1, njobs=1, hot_start=False)
+    config = dict(zorder=10, lw=4)
+    tsv.plot(ax=ax, color='m', **config)
+
+    for i, optima in enumerate(tss.smooth.optima):
+        # o = np.
+        # label=fR'$\lambda = {o:.3f}$',
+        tsv[i].plot(ax=ax,  **config)
+
+    fig.set_size_inches(11, 5)
+    fig.subplots_adjust(right=0.75)
+    ax.legend(loc='upper left',
+              bbox_to_anchor=(1.02, 1.02),
+              title=fR'${n = }, n_w = {nwindow}, n_o = {noverlap}$')
+    return fig
 
 
 @pytest.mark.mpl_image_compare(baseline_dir='images/smoothing/windowed')

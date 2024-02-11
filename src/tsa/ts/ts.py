@@ -115,7 +115,7 @@ class Smoothing(Interface):
     def __call__(self, x, wsize=11, window='hanning'):
         return KernelSmoother(window, wsize)(x)
 
-    def tv(self, amount=None, nwindow=None, noverlap=0, njobs=-1):
+    def tv(self, smoothing=None, nwindow=None, noverlap=0, λ0=1, njobs=-1, **kws):
 
         t, x, u = self.get_data(())
         # x = x[(..., *[np.newaxis] * (x.ndim == 1))].T
@@ -123,7 +123,7 @@ class Smoothing(Interface):
 
         if nwindow:
             njobs = (njobs, )
-            smoother = tv.WindowSmoother(nwindow, noverlap)
+            smoother = tv.WindowSmoother(nwindow, noverlap, **kws)
             name = 'tv.WindowSmoother'
         else:
             # no windowing. might bork for long ts
@@ -138,10 +138,10 @@ class Smoothing(Interface):
         for i, xx in enumerate(x.T):
             smoother.jobname = f'{name} ({i + 1}/{m})'
             self.logger.debug('Running {} with njobs={} on {} array, λ = {}.',
-                              smoother.jobname, njobs, xx.shape, amount)
-            result = smoother(t, xx, amount, *njobs)
+                              smoother.jobname, njobs, xx.shape, smoothing)
+            result = smoother(t, xx, smoothing, λ0, *njobs)
 
-            if amount:
+            if smoothing:
                 y[:len(result), i] = result
             else:
                 result, optimum = result
