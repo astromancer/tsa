@@ -10,11 +10,12 @@ import itertools as itt
 
 # third-party
 import numpy as np
+from loguru import logger
 from scipy.signal import correlate
 
 # local
 from recipes.flow import Emit
-from recipes.concurrent import Executor
+from recipes.concurrency import Executor
 from recipes.logging import LoggingMixin
 from recipes.oo.property import CachedProperty
 
@@ -66,7 +67,7 @@ def _resolve_stat(stat, obj, lookup, *args):
     if callable(stat):
         return stat(*args)
 
-    # 
+    #
     raise TypeError(
         f'Numeric input required for {lookup!r}, not {type(stat).__name__}.'
     )
@@ -75,12 +76,12 @@ def _resolve_stat(stat, obj, lookup, *args):
 # ---------------------------------------------------------------------------- #
 
 class ACFDirectCompute(Executor):
+
     def compute(self, data, index, **kws):
         i, j = index
         r = _lag_acor_norm(data[i], j + 1)
         if not np.ma.is_masked(r):
             self.results[index] = r
-        # print(i, j, r)
 
 
 def _lag_acor_norm(x, lag):
@@ -107,6 +108,52 @@ def quadnorm(a):
 
 def quadmean(a):
     return quadnorm(a) / (~a.mask).sum()
+
+
+# ---------------------------------------------------------------------------- #
+# class WindowedAnalysis:
+#     def __init__(nwindow=None, noverlap=0, njobs=-1, **kws):
+
+
+#     def __call__(self, x, wsize=11, window='hanning'):
+#         return KernelSmoother(window, wsize)(x)
+
+#     def tv(self, smoothing=None, nwindow=None, noverlap=0, λ0=1, njobs=-1, **kws):
+
+#         t, x, u = self.get_data(())
+#         # x = x[(..., *[np.newaxis] * (x.ndim == 1))].T
+#         y = np.empty_like(x)
+
+#         if nwindow:
+#             njobs = (njobs, )
+#             smoother = tv.MovingWindowSmoother(nwindow, noverlap, **kws)
+#             name = 'tv.MovingWindowSmoother'
+#         else:
+#             # no windowing. might bork for long ts
+#             njobs = ()
+#             smoother = tv.smooth
+#             name = 'tv.smooth'
+
+#         if (m := x.shape[1]) > 1:
+#             self.logger.debug('Looping over {} variates.', m)
+
+#         self.optima = []
+#         for i, xx in enumerate(x.T):
+#             smoother.jobname = f'{name} ({i + 1}/{m})'
+#             self.logger.debug('Running {} with njobs={} on {} array, λ = {}.',
+#                               smoother.jobname, njobs, xx.shape, smoothing)
+#             result = smoother(t, xx, smoothing, λ0, *njobs)
+
+#             if smoothing:
+#                 y[:len(result), i] = result
+#             else:
+#                 result, optimum = result
+#                 y[:len(result), i] = result
+#                 self.optima.append(optimum)
+
+#         #     return y, np.reshape(optima, (-1, i + 1))
+
+#         return TimeSeries(t, y)
 
 
 # ---------------------------------------------------------------------------- #
@@ -153,6 +200,10 @@ class Smoothing(Interface):
         return TimeSeries(t, y)
 
 
+# class OutlierDetection(Interface):
+#     def __call__(self, nwindow, noverlap):
+
+
 # ---------------------------------------------------------------------------- #
 
 class TimeSeries(LoggingMixin):
@@ -193,8 +244,9 @@ class TimeSeries(LoggingMixin):
     # ------------------------------------------------------------------------ #
     plot = TimeSeriesPlot(xlabel='Time (s)',
                           ylabel='Signal')
-
+    #
     smooth = Smoothing()
+    # mwa
 
     # ------------------------------------------------------------------------ #
     # Constructors
@@ -206,7 +258,7 @@ class TimeSeries(LoggingMixin):
         t, x, u = cls._parse_init_args(*args)
 
         if np.squeeze(x).ndim > 1:
-            obj = super().__new__(MultiVariateTimeSeries)
+            obj = super().__new__(cls.multivariate)
             # init will not run automatically since this returns an object of a
             # different class
             cls.__init__(obj, t, x, u)
@@ -215,10 +267,9 @@ class TimeSeries(LoggingMixin):
         return super().__new__(cls)
 
     # ------------------------------------------------------------------------ #
-    #
     def __init__(self, *args, **kws):
         """
-        Create a TimeSeries object
+        Create a TimeSeries object.
 
         Examples
         --------
@@ -524,7 +575,6 @@ class TimeSeries(LoggingMixin):
 
         return type(self)(t, y, v)
 
-
     def compressed(self):
         if np.ma.is_masked(self.x):
             return self
@@ -608,10 +658,50 @@ class TimeSeries(LoggingMixin):
     # def fold(self, eph):
 
 
-class MultiVariateTimeSeries(TimeSeries):
+class UnivariateDescriptor:
+
+    def __init__(self, kls):
+        self.kls = kls
+
+    def __get__(self, instance, kls):
+        return self.kls
+
+    def __set__(self, instance, value):
+
+        if issubclass(value, TimeSeries):
+            self.kls = value
+            return
+
+        # if value is None:
+        #     from IPython import embed
+        #     embed(header="Embedded interpreter at 'src/tsa/ts/ts.py':675")
+
+        raise TypeError(
+            f'Unvariate class for objects of type {type(self).__name__} should'
+            ' inherit from `TimeSeries`.'
+        )
+
+    def __set_name__(self, owner, name):
+        # set the class that uses this descriptor as `multivariate` attribute on
+        # instance of univariate class
+        logger.debug('Assigned {} as multivariate class of {!r}.',
+                     owner, self.kls)
+        self.multivariate = owner
+
+
+class MultiVariate:
     # support for simultaneous multivariate data
 
-    # def decorrelate()
+    univariate = UnivariateDescriptor(None)
+        
+    def __init_subclass__(cls):
+        for parent in set(cls.__bases__) - {MultiVariate}:
+            if issubclass(parent, TimeSeries):
+                cls.univariate = parent
+                parent.multivariate = cls
+                return
+
+        raise TypeError(f'No univariate counterpart to {cls}.')
 
     def __repr__(self):
         # .replace(',', ' ')
@@ -627,12 +717,23 @@ class MultiVariateTimeSeries(TimeSeries):
         # select variate
         key, m = key
         data = self.x[key, m]
-        kls = TimeSeries if len(data) else tuple
-        return kls(None if self.t is None else self.t[key],
-                   data,
-                   None if self.u is None else self.u[key, m])
+        kls = self.univariate if len(data) else tuple
+
+        if kls and isinstance(kls, type):
+            return kls(None if self.t is None else self.t[key],
+                       data,
+                       None if self.u is None else self.u[key, m])
+
+        raise TypeError(
+            f'Invlaid univariate class {kls.__name__} for multivariate '
+            f'{type(self).__name__}.')
 
     # def __iter__(self):
+
+
+class MultiVariateTimeSeries(MultiVariate, TimeSeries):
+    # univariate = TimeSeries
+    pass
 
 
 # alias

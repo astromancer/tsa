@@ -10,7 +10,7 @@ import numpy as np
 from scipy import stats
 
 # local
-from recipes.lists import flatten
+from recipes.containers import flatten
 
 
 def get_delta_t(t, t_cyc=np.ma.masked):

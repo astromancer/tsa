@@ -12,7 +12,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.transforms import blended_transform_factory as btf
 
 # local
-from recipes.dicts import AttrDict, AttrReadItem
+from recipes.containers.dicts import AttrDict, AttrReadItem
 from scrawl.ticks import ReciprocalFormatter
 from scrawl.moves import CallbackManager, mpl_connect
 
