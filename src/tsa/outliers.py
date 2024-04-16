@@ -1,24 +1,20 @@
 
-# std
-import warnings
-from collections import defaultdict
-
 # third-party
 import numpy as np
-from loguru import logger
-from scipy.signal import get_window
 from astropy.stats import sigma_clipped_stats
 
 # local
 from recipes.array import fold
 
 # relative
-from .windowing import resolve_size
-from .spectral import resolve_overlap
+from .windowing import MovingWindowAnalysis, resolve_size
 
 
-# TODO: OCSVM, Tietjen-Moore, Topological Anomaly detection
+# ---------------------------------------------------------------------------- #
+# TODO: OCSVM, Tietjen-Moore, Topological Anomaly detection, Quantile regression
+# GMM
 
+# ---------------------------------------------------------------------------- #
 
 def generalizedESD(x, kmax='0.02%', alpha=0.05, full_output=False):
     """
@@ -93,13 +89,14 @@ def generalizedESD(x, kmax='0.02%', alpha=0.05, full_output=False):
     # Get number of outlier points
     k = next((i + 1 for i in range(kmax - 1, -1, -1) if R[i] > L[i]), 0)
     out = idx[:k]
+
     return (out, k, R, L, idx) if full_output else out
 
 
 # alias
 gESD = generalizedESD
 
-# def CovEstOD(data, classifier=None, threshold=0):
+# def CovarianceEstimate(data, classifier=None, threshold=0):
 #     if classifier is None:
 #     from sklearn.covariance import EllipticEnvelope
 #     classifier = EllipticEnvelope(support_fraction=1., contamination=0.1)
@@ -110,7 +107,7 @@ gESD = generalizedESD
 #     return idx
 
 
-def CovEstOD(data, classifier=None, n=1, **kw):
+def CovarianceEstimate(data, classifier=None, n=1, **kw):
     # multivariate outlier detection
 
     if classifier is None:
@@ -121,8 +118,7 @@ def CovEstOD(data, classifier=None, n=1, **kw):
                                       contamination=contamination)
 
     classifier.fit(data)
-    outliers, = np.where(classifier.predict(data) == -1)
-    return outliers
+    return np.where(classifier.predict(data) == -1)
 
 
 def get_ellipse(classifier, **kws):
@@ -149,74 +145,113 @@ def get_ellipse(classifier, **kws):
     return Ellipse(classifier.location_, 2 * a, 2 * b, theta, **kws)
 
 
-def detect_window(data, nwindow, noverlap,
-                  method=gESD, weight_kernel='boxcar', threshold=0.5,
-                  *args, **kws):
-    """
-    Outlier detection using moving window
+METHODS = {'gESD': gESD}
 
-    Parameters
-    ----------
-    data: array-like
-        The data set to be tested for outliers
-    nwindow: int
-        window size
-    noverlap: int
-        overlap from one window to next
-    method: callable
-        function to be used for outlier detection on each window
-    weight_kernel: str | np.array, optional
-        window function to weight the outlier probabilities for each window.
-        Default is uniform weighting.
-    return_index: bool
-    return_mask: bool
-    return_masked_data: bool
-    args
-    kws
 
-    Returns
-    -------
+class MovingWindowDetection(MovingWindowAnalysis):
 
-    """
-    # TODO: paralellize!
+    def __init__(self, nwindow, noverlap='25%', weight_kernel=None,
+                 method='gESD', threshold=0.5,
+                 jobname=None, backend='multiprocessing', xfail=10, **kws):
+        """
+        Outlier detection using moving window
 
-    noverlap = resolve_overlap(nwindow, noverlap)
+        Parameters
+        ----------
+        data: array-like
+            The data set to be tested for outliers
+        nwindow: int
+            window size
+        noverlap: int
+            overlap from one window to next
+        method: callable
+            function to be used for outlier detection on each window
+        weight_kernel: str | np.array, optional
+            window function to weight the outlier probabilities for each window.
+            Default is uniform weighting.
+        return_index: bool
+        return_mask: bool
+        return_masked_data: bool
+        args
+        kws
 
-    assert data.ndim == 1
+        Returns
+        -------
 
-    n = len(data)
-    assert n > 1
+        """
 
-    if n < nwindow:
-        warnings.warn(f'Data length {n} is smaller than window size {nwindow}! '
-                      'Setting the window size to data size.')
-        return method(data, *args, **kws)
+        super().__init__(nwindow, noverlap, weight_kernel, jobname, backend, xfail, **kws)
+        self.method = METHODS[method]
+        self.threshold = float(threshold)
 
-    step = nwindow - noverlap
-    noc = fold.get_n_repeats(n, nwindow, noverlap)
+    def init_memory(self, shape, masked=False, loc=None, overwrite=False):
+        super().init_memory(shape, masked, loc, False, overwrite)
 
-    weight_kernel = weight_kernel or 'boxcar'
-    weights = get_window(weight_kernel, nwindow)
+    def _compute(self, data, *args, **kws):
+        for ts in data:
+            return self.method(data, *args, **kws)
 
-    prob = defaultdict(int)
-    for i, section in enumerate(folded := fold.fold(data, nwindow, noverlap)):
-        logger.debug('Section {}/{}.', i, len(folded))
-        if np.ma.is_masked(section):
-            section = section[~section.mask]
+    def collect(self, index, result):
+        self.results[result] = True
 
-        # indices of outliers relative to this window
-        widx = method(section.T, *args, **kws) if len(section) else []
-        # can be that the entire sectionment is masked
+    def finalize(self, **kws):
+        # results = super().finalize(self, **kws)
 
-        if len(widx):
-            didx = i * step + np.array(widx)  # indices relative to data
-            # remove indices that exceed array dimensions
-            didx = didx[didx < n]
-            for ii, jj in zip(widx, didx):
-                prob[jj] += weights[ii] / noc[jj]
-                # mean probability that points where flagged as outliers
+        from IPython import embed
+        embed(header="Embedded interpreter at 'src/tsa/outliers.py':205")
+        
+    #     if len(widx):
+    #         didx = i * step + np.array(widx)  # indices relative to data
+    #         # remove indices that exceed array dimensions
+    #         didx = didx[didx < n]
+    #         for ii, jj in zip(widx, didx):
+    #             prob[jj] += weights[ii] / noc[jj]
+    #             # mean probability that points where flagged as outliers
 
-    return np.sort([idx for idx, p in prob.items() if p > threshold]).astype(int)
+    # return np.sort([idx for idx, p in prob.items() if p > threshold]).astype(int)
+
+
+# def detect_window(data, nwindow, noverlap,
+#                   method=gESD, weight_kernel='boxcar', threshold=0.5,
+#                   *args, **kws):
+
+#     noverlap = resolve_overlap(nwindow, noverlap)
+
+#     assert data.ndim == 1
+
+#     n = len(data)
+#     assert n > 1
+
+#     if n < nwindow:
+#         warnings.warn(f'Data length {n} is smaller than window size {nwindow}! '
+#                       'Setting the window size to data size.')
+#         return method(data, *args, **kws)
+
+#     step = nwindow - noverlap
+#     noc = fold.get_n_repeats(n, nwindow, noverlap)
+
+#     weight_kernel = weight_kernel or 'boxcar'
+#     weights = get_window(weight_kernel, nwindow)
+
+#     prob = defaultdict(int)
+#     for i, section in enumerate(folded := fold.fold(data, nwindow, noverlap)):
+#         logger.debug('Section {}/{}.', i, len(folded))
+#         if np.ma.is_masked(section):
+#             section = section[~section.mask]
+
+#         # indices of outliers relative to this window
+#         widx = method(section.T, *args, **kws) if len(section) else []
+#         # can be that the entire sectionment is masked
+
+#         if len(widx):
+#             didx = i * step + np.array(widx)  # indices relative to data
+#             # remove indices that exceed array dimensions
+#             didx = didx[didx < n]
+#             for ii, jj in zip(widx, didx):
+#                 prob[jj] += weights[ii] / noc[jj]
+#                 # mean probability that points where flagged as outliers
+
+#     return np.sort([idx for idx, p in prob.items() if p > threshold]).astype(int)
 
     # if return_index:
     #     return indices
@@ -238,9 +273,6 @@ def detect_window(data, nwindow, noverlap,
     #     return data
 
 
-WindowOutlierDetection = detect_window
-
-
 def sigma_clip_masked(x, siglow=3, sighi=3):
     xmean, xmed, xstd = sigma_clipped_stats(x)
     return np.ma.masked_outside(x, xmed - siglow * xstd, xmed + sighi * xstd)
@@ -248,7 +280,7 @@ def sigma_clip_masked(x, siglow=3, sighi=3):
 
 def running_sigma_clip(x, sig=3., nwindow=100, noverlap=0, iters=None,
                        cenfunc=np.ma.median, varfunc=np.ma.var):
-    # TODO:  Incorporate in WindowOutlierDetection
+    # TODO:  Incorporate in MovingWindowDetection
 
     # NOTE: SLOWWWWWWWWW...................
 
@@ -289,6 +321,7 @@ def plot_clippings(ax, t, x, tclp, xclp, med, std, threshold, nwindow=0,
                    label='data', **kw):
     # med, v = running_stats(x, nwindow, center=False)
     # std = np.sqrt( v )
+    from matplotlib.patches import Rectangle
 
     ax.plot(t, x, 'go', ms=3, label=label)
     ax.plot(tclp, xclp, 'x', mec='r', mew=1, label='clipped')

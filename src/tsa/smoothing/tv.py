@@ -22,142 +22,20 @@ from scipy.sparse.linalg import inv
 from scipy.sparse import csc_matrix, eye, lil_matrix
 
 # local
-from recipes.array import fold
 from recipes.io import load_memmap
-from recipes.concurrent.executor import Executor
+
+# relative
+from ..windowing import MovingWindowAnalysis
 
 
 # ---------------------------------------------------------------------------- #
-# Even the spare matrix implimentation has limits
+# Even the spare matrix implimentation has limits. Change this at your own risk/
+# discretion based on your compute environment
 MAX_ARRAY_SIZE = 5000
 
+
 # ---------------------------------------------------------------------------- #
-
-
-# def _sanitize(x, y):
-#     # remove masked points
-#     ok = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
-#     return np.ma.getdata(x[ok]), np.ma.getdata(y[ok])
-
-class WindowSmoother(Executor):
-
-    __slots__ = ('n', 'nwindow', 'noverlap', 'hot_start', 'optima')
-
-    def __init__(self, nwindow, noverlap='25%', hot_start=False,
-                 jobname=None, backend='multiprocessing', xfail=10, **kws):
-
-        self.n = None  # set in call
-        self.nwindow = nwindow
-        self.noverlap = noverlap
-        self.hot_start = bool(hot_start)
-        self.optima = None
-        super().__init__(jobname, backend, xfail, **kws)
-
-    def init_memory(self, shape, masked=False, loc=None, overwrite=False):
-        super().init_memory(shape, masked, loc, overwrite)
-        self.optima = load_memmap(loc, shape[0], float, np.nan)
-
-    def __call__(self, t, x, smoothing=None, λ0=1, njobs=-1):
-
-        x = np.asanyarray(x).squeeze()
-        n = self.n = len(x)
-        assert x.ndim == 1
-        if t is None:
-            t = np.arange(n)
-        else:
-            assert len(t) == n
-
-        # get window / overlap size
-        self.nwindow = nwindow = fold.resolve_size(self.nwindow, n)
-        self.noverlap = noverlap = fold.resolve_size(self.noverlap, nwindow)
-        if noverlap > nwindow // 2:
-            raise ValueError(
-                'Window overlap should be less than half window size for TVR.'
-            )
-        if noverlap == 0:
-            logger.warning('Overlap is recommended to avoid edge effects.')
-
-        # Fold arrays
-        tf = fold.fold(t, nwindow, noverlap)
-        data = fold.fold(x, nwindow, noverlap)
-        nsegs = tf.shape[0]
-
-        # rescale λ to window size
-        if smoothing:
-            smoothing *= (n / nwindow) ** 3
-
-        # Compute
-        masked = np.ma.is_masked(x) | np.ma.is_masked(t)
-        self.init_memory((nsegs, nwindow), masked)
-        return self.run(zip(tf, data), smoothing=smoothing, λ0=λ0, njobs=njobs)
-
-    def compute(self, data, index, **kws):
-        if kws.get('smoothing') is None and self.hot_start:
-            λ0 = λ0 if np.isfinite(λ0 := np.nanmedian(self.optima)) else 1
-            kws['λ0'] = λ0
-            self.logger.debug('Hot start: λ0 = {:.3g}.', λ0)
-
-        return super().compute(data, index, **kws)
-
-    def _compute(self, data, smoothing, **kws):
-        return smooth(*data, smoothing, **kws)
-
-    def collect(self, index, result):
-        # collect
-        if isinstance(result, tuple):
-            result, optimum = result
-            self.optima[index] = optimum
-
-        # save results
-        super().collect(index, result)
-
-    def finalize(self, smoothing, **kws):
-        # collect results
-        results = np.ma.MaskedArray(self.results, self.mask)
-
-        if self.noverlap:
-            # concatenate
-            start, odd = divmod(self.noverlap, 2)
-            end = -(start + odd)
-            result = np.ma.hstack([
-                results[0, :end],
-                results[1:, start:end].ravel(),
-            ])[:self.n]
-        else:
-            result = results.reshape(-1)
-
-        if smoothing:
-            return result
-
-        return result, self.optima
-
-
-def _check_arrays(x, y, size_limit=MAX_ARRAY_SIZE):
-    y = np.asanyarray(y).squeeze()
-    if y.ndim != 1:
-        raise ValueError(f'Input data should be 1D not {y.ndim}D.')
-
-    if (n := y.size) > size_limit:
-        raise ValueError(
-            f'Array too large: {n} > {size_limit}. This is here to prevent '
-            'memory overflow during the optimization. For large arrays you may '
-            'wish to usethe `tv.WindowSmoother` class to smooth the time '
-            'sereis segment by segment.'
-        )
-
-    if x is None:
-        x = np.arange(n)
-    else:
-        x = np.asanyarray(x).squeeze()
-        if x.ndim != 1:
-            raise ValueError(f'Input data should be 1D not {y.ndim}D.')
-
-        if x.size != n:
-            raise ValueError('Input vectors should be the same size: '
-                             f'({len(x) = }) != ({len(y) = })')
-
-    return x, y
-
+# API
 
 def smooth(x, y=None, λs=None, λ0=1, d=2):
     """
@@ -184,29 +62,67 @@ def smooth(x, y=None, λs=None, λ0=1, d=2):
 
     # sanitize
     x, y = _check_arrays(x, y)
+    result = np.ma.empty((len(y), len(x)))
 
     if λs is None:
         # optimal λ search
         # yhat, λopt = smooth_optimal(x, y, d)
-        return smooth_optimal(x, y, λ0, d=d)
+        optima = np.empty(len(y))
+        for i, yy in enumerate(y):
+            result[i], optima[i] = smooth_optimal(x, yy, λ0, d=d)
+
+        return result, optima
 
     if isinstance(λs, numbers.Real):
         if np.ma.is_masked(x) | np.ma.is_masked(y):
             # handle masked data
-            out = np.ma.empty(y.shape)
-            ok = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
-            out[ok] = _smooth(x[ok], y[ok], λs, d)
-            out[~ok] = np.ma.masked
-            return out
+            result = np.ma.masked_all(y.shape)
+            #
+            for i, yy in enumerate(y):
+                ok = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(yy))
+                result[i, ok] = _smooth(x[ok], yy[ok], λs, d)
+            return result
 
-        return _smooth(x, y, λs, d)
+        for i, yy in enumerate(y):
+            result[i] = _smooth(x, yy, λs, d)
+
+        return result
 
     raise ValueError(f'Invalid smoothing parameter: {λs = }. Should be a real'
-                     ' number, or `None` for optimal smoothing.')
+                     ' number, or `None` for optimal TVR smoothing.')
 
 
 # alias
 smoother = smooth
+
+
+def _check_arrays(x, y, size_limit=MAX_ARRAY_SIZE):
+    """Check consistent array shapes"""
+    y = np.ma.atleast_2d(y)
+
+    if y.ndim > 2:
+        raise ValueError(f'Input data should be at most 2D, not {y.ndim}D.')
+
+    if (n := y.shape[-1]) > size_limit:
+        raise ValueError(
+            f'Array too large: {n} > {size_limit}. This is here to prevent '
+            'memory overflow during the optimization. For large arrays you may '
+            'wish to usethe `tv.MovingWindowSmoother` class to smooth the time '
+            'sereis segment by segment.'
+        )
+
+    if x is None:
+        x = np.arange(n)
+    else:
+        x = np.asanyarray(x).squeeze()
+        if x.ndim != 1:
+            raise ValueError(f'Input data should be 1D not {y.ndim}D.')
+
+        if x.size != n:
+            raise ValueError('Input vectors should be the same size: '
+                             f'({len(x) = }) != {n}.')
+
+    return x, y
 
 
 def _smooth(x, y, λs, d=2):
@@ -293,9 +209,8 @@ def _smooth_optimal(x, y, λ0=1, d=2):
 
     # assert λ0 > 0
     λs0 = λ0 / δ
-    logger.opt(lazy=True).debug(
-        '{}', lambda: f'Minimize starting at {λs0 = :.3g} ({δ = :.3g}) {xscale = :.3g}'
-    )
+    logger.opt(lazy=True).debug('{}', lambda: f'Minimize starting at {λs0 = :.3g} '
+                                              f'({δ = :.3g}) {xscale = :.3g}')
     #
     result = minimize(_objective, λs0, (y, I, D_, R, U), 'Nelder-Mead',
                       bounds=[(0, None)])
@@ -307,7 +222,6 @@ def _smooth_optimal(x, y, λ0=1, d=2):
 
         # rescale result back to input coordinate scale
         λ = λopt * δ / xscale
-
         return yhat, λ
 
     raise ValueError(f'Optimization unsuccessful: {result.message!r}.')
@@ -325,6 +239,12 @@ def _objective(λ, y, I, D_, R, U):
     #       rss
     # returns the cross validation variance associated with the smoothness λ
     return (np.square(yhat - y).sum() / n) / (1 - H_.trace() / n) ** 2
+
+
+# def _sanitize(x, y):
+#     # remove masked points
+#     ok = ~(np.ma.getmaskarray(x) | np.ma.getmaskarray(y))
+#     return np.ma.getdata(x[ok]), np.ma.getdata(y[ok])
 
 
 # def D(x, d=1):
@@ -393,3 +313,77 @@ def Vgcv(x, y, yhat, λs):
     n = len(y)
     rss = np.square(yhat - y).sum()
     return (rss / n) / (1 - np.trace(H(x, y, λs)) / n) ** 2
+
+
+# ---------------------------------------------------------------------------- #
+
+class MovingWindowSmoother(MovingWindowAnalysis):
+
+    __slots__ = ('hot_start', 'optima')
+
+    def __init__(self, nwindow, noverlap='25%', hot_start=False,
+                 jobname=None, backend='multiprocessing', xfail=10, **kws):
+
+        self.hot_start = bool(hot_start)
+        self.optima = None
+        super().__init__(nwindow, noverlap, None, jobname, backend, xfail, **kws)
+
+    def __repr__(self):
+        return super().__repr__(
+            ignore=('n_repeats', 'jobname', 'backend',  'nfail', 'hot_start', 
+                    'optima')
+        )
+
+    def init_memory(self, shape, masked=False, loc=None, overwrite=False):
+        super().init_memory(shape, masked, loc, overwrite=overwrite)
+        self.optima = load_memmap(loc, shape[0], fill=np.nan)
+
+    def __call__(self, t, x, smoothing=None, λ0=1, njobs=-1):
+        return super().__call__(t, x, njobs, smoothing=smoothing, λ0=λ0, )
+
+    def check(self):
+        if self.noverlap > self.nwindow // 2:
+            raise ValueError(
+                'Window overlap should be less than half window size for TVR.'
+            )
+        if self.noverlap == 0:
+            self.logger.warning('Overlap is recommended to avoid edge effects.')
+
+    def run(self, data=None, indices=None, njobs=-1, progress_bar=True,
+            args=(), smoothing=None, **kws):
+
+        # rescale λ to window size
+        if smoothing:
+            smoothing *= (self.n / self.nwindow) ** 3
+
+        return super().run(data, indices, 1, progress_bar, args,
+                           smoothing=smoothing, **kws)
+
+    def compute(self, data, index, **kws):
+        if kws.get('smoothing') is None and self.hot_start:
+            λ0 = λ0 if np.isfinite(λ0 := np.nanmedian(self.optima)) else 1
+            kws['λ0'] = λ0
+            self.logger.debug('Hot start: λ0 = {:.3g}.', λ0)
+
+        return super().compute(data, index, **kws)
+
+    def _compute(self, data, smoothing, **kws):
+        return smooth(*data, smoothing, **kws)
+
+    def collect(self, index, result):
+        # collect
+        if isinstance(result, tuple):
+            result, optimum = result
+            self.optima[index] = optimum
+
+        # save results
+        super().collect(index, result)
+
+    def finalize(self, smoothing, **kws):
+        # collect results
+        results = super().finalize(**kws)
+
+        if smoothing:
+            return results
+
+        return results, self.optima

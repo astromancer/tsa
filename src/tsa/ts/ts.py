@@ -123,8 +123,8 @@ class Smoothing(Interface):
 
         if nwindow:
             njobs = (njobs, )
-            smoother = tv.WindowSmoother(nwindow, noverlap, **kws)
-            name = 'tv.WindowSmoother'
+            smoother = tv.MovingWindowSmoother(nwindow, noverlap, **kws)
+            name = 'tv.MovingWindowSmoother'
         else:
             # no windowing. might bork for long ts
             njobs = ()
