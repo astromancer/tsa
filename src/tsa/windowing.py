@@ -133,10 +133,8 @@ class MovingWindowAnalysis(Executor):
         self.weight_kernel = weight_kernel
         self.weights = None
 
-    def __repr__(self):
-        return super().__repr__(
-            ignore=('n_repeats', 'jobname', 'backend',  'nfail')
-        )
+    def __repr__(self, ignore=('n_repeats', 'jobname', 'backend',  'nfail'), **kws):
+        return super().__repr__(ignore=ignore, **kws)
 
     def __call__(self, t, x, njobs=-1, **kws):
 
@@ -156,7 +154,8 @@ class MovingWindowAnalysis(Executor):
         self.noverlap = noverlap = fold.resolve_size(self.noverlap, nwindow)
         self.n_repeats = fold.get_n_repeats(n, nwindow, noverlap)
         self.check()  # NOTE: changes nwindow!
-        nwindow = self.nwindow
+        # nwindow = self.nwindow
+        # noverlap = self.noverlap
 
         if self.weight_kernel:
             self.weights = get_window(self.weight_kernel, nwindow)
@@ -174,10 +173,11 @@ class MovingWindowAnalysis(Executor):
     def check(self):
         if self.n < self.nwindow:
             self.logger.warning(
-                'Data length {.n} is smaller than window size {.nwindow}! '
+                'Data length {0.n} is smaller than window size {0.nwindow}! '
                 'Setting the window size to data size.', self
             )
-            self.nwindow = self.n
+            # self.nwindow = self.n
+            # self.noverlap = 0
 
     def _compute(self, data, **kws):
         raise NotImplementedError()
@@ -186,12 +186,11 @@ class MovingWindowAnalysis(Executor):
         # collect results
         results = np.ma.MaskedArray(self.results, self.mask)
 
-        if self.noverlap:
-            if self.nwindow == self.n:
-                from IPython import embed
-                embed(header="Embedded interpreter at 'src/tsa/windowing.py':186")
-                return results
+        if self.n <= self.nwindow:
+            # start, end = 0, None
+            return results[0].T
 
+        if self.noverlap:
             # concatenate
             start, odd = divmod(self.noverlap, 2)
             end = -(start + odd)
