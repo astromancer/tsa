@@ -15,6 +15,7 @@ from matplotlib import ticker
 from matplotlib.transforms import Affine2D, blended_transform_factory as btf
 from loguru import logger
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.axes_grid1.parasite_axes import SubplotHost
 
 # local
 from recipes import api, dicts
@@ -207,7 +208,7 @@ def auto_transpose(array, shortest=1):
     assert array.ndim == 2
 
     if np.argmax(array.shape) != shortest:
-        logger.info('Transposing input data to column-variate form: {}',
+        logger.info('Transposing input data to row-variate form: {}',
                     array.shape[::-1])
         return array.T
 
@@ -439,25 +440,23 @@ def uncertainty_contours(ax, t, signal, stddev, styles, **kws):
     return ax.plot(t, smoother(signal - sigma * stddev), colour, **kws)
 
 
-def get_axes(ax, figsize=None, twinx=None, **kws):
+def get_axes(ax, twinx=None, figure=None, **kws):
 
     if ax is not None:
         return ax.figure, ax
 
     # get axes with parasite (sic)
-    if twinx is not None:
-        if axes_cls := TWIN_AXES_CLASSES.get(twinx):
-            # make twin
-            fig = plt.figure(figsize=figsize)
-            ax = axes_cls(fig, 1, 1, 1, **kws)
-            ax.setup_ticks()
-            fig.add_subplot(ax)
-            return fig, ax
+    if twinx:
+        # make twin
+        figure = figure or plt.figure()
 
-        #
-        warn('Option %r not understood for argument `twinx`. Ignoring.', twinx)
+        Axes = TWIN_AXES_CLASSES.get(twinx, SubplotHost)
+        ax = Axes(figure, 1, 1, 1, **kws)
+        # ax.setup_ticks()
+        figure.add_subplot(ax)
+        return figure, ax
 
-    return plt.subplots(figsize=figsize)
+    return plt.subplots(**kws)
 
 
 # ---------------------------------------------------------------------------- #
@@ -551,9 +550,11 @@ class TimeSeriesPlot(Interface):
         show_hist = bool(hist)
 
         # setup figure if needed
-        self.fig, self.ax, self.hax = self.setup_figure(ax, self._show_hist)
+        kws, figkws = dicts.split(kws, ('figure', 'figsize', 'twinx'))
+        self.fig, self.ax, self.hax = self.setup_figure(
+            ax, self._show_hist)
 
-        self.logger.info(f'{self.xlim = }, {self.ylim = }')
+        # self.logger.info(f'{self.xlim = }, {self.ylim = }')
 
         # parse input args: times, signals, y_err, x_err
         data = self.get_data(data)
@@ -601,16 +602,25 @@ class TimeSeriesPlot(Interface):
 
     plot = __call__
 
-    def setup_figure(self, ax, show_hist, **kws):
+    def setup_figure(self, ax, figure=None, figsize=None, twinx=None,
+                     show_hist=False, **kws):
         """Setup figure geometry"""
 
         if ax is None:
             self.xlim = np.array([np.inf, -np.inf])
             self.ylim = np.array([np.inf, -np.inf])
-        # else:
+        else:
+            self.xlim = np.array(ax.get_xlim())
+            self.ylim = np.array(ax.get_ylim())
+
+        if figure:
+            raise NotImplementedError
 
         # get / create figure, axes
-        fig, ax = get_axes(ax, kws.pop('figsize', None))
+        fig, ax = get_axes(ax, twinx, figure)
+
+        if figsize:
+            fig.set_size_inches(figsize)
 
         # Add subplot for histogram
         # FIXME: leave space on the right of axes for offsets if draggable
