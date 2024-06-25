@@ -17,7 +17,7 @@ from scrawl.ticks import ReciprocalFormatter
 from scrawl.moves import CallbackManager, mpl_connect
 
 # relative
-from ..smoothing import smoother
+from ..smooth import smooth
 
 
 # TODO: limit frequency axes at 0 when zooming / panning etc
@@ -282,7 +282,7 @@ class TimeFrequencyBase:
         art = {}
         for q, p in zip(self.q_levels, percentiles):
             art[f'pgram{q}'], = self.axes.spec.plot(
-                smoother(p, smoothing), frq, ls.get(q, ':'),
+                smooth(p, smoothing), frq, ls.get(q, ':'),
                 **(pg_props or {})
             )
 
@@ -461,7 +461,7 @@ class TimeFrequencyMap(TimeFrequencyBase, CallbackManager):
         """ """
         data = self.spec.power[ix]
         if smoothing:
-            data = smoother(data, smoothing)
+            data = smooth(data, smoothing)
         if scaling:
             data = data * scaling
 

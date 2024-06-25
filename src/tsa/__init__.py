@@ -2,6 +2,11 @@
 Time Series Analysis Tools
 """
 
-from . import detrending
+from . import detrend, window, smooth
 from .spectral import tfr
 from .ts import TimeSeries
+
+
+# aliases
+windowing = window
+smoothing = smooth

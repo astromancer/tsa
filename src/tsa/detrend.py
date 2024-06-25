@@ -2,16 +2,15 @@
 Various de-trending (low-pass filtering) methods.
 """
 
-# TODO: change name of this
-# look at scipy.sigtools.detrend
 
 # third-party
 import numpy as np
 
 # relative
-from .smoothing import smoother
+from . import smooth as sm
 
 
+# ---------------------------------------------------------------------------- #
 ORDER_NAMES = ['mean', 'linear', 'quadratic', 'cubic', 'quartic', 'quintic']
 NAMED_ORDERS = dict(map(reversed, enumerate(ORDER_NAMES)))
 
@@ -19,6 +18,8 @@ NAMED_ORDERS = dict(map(reversed, enumerate(ORDER_NAMES)))
 # TODO:
 # SplineDetrend
 
+# TODO: change name of this
+# look at scipy.sigtools.detrend
 
 # TODO
 # def MA():
@@ -27,7 +28,9 @@ NAMED_ORDERS = dict(map(reversed, enumerate(ORDER_NAMES)))
 # Holt exponential smoother?
 
 
-def resolve_detrend(method):
+# ---------------------------------------------------------------------------- #
+
+def resolve(method):
     # TODO: unify detrend & smoothing into filtering interface
     if method is None:
         return None, None, {}
@@ -88,7 +91,7 @@ def smooth(x, wsize=11, window='hanning', fill=None, preserve_energy=False):
     """
     Detrends the time series by smoothing and returning the residuals.
     """
-    s = smoother(x, wsize, window, fill, output_masked=None)
+    s = sm.smooth(x, wsize, window, fill, output_masked=None)
     return x - s
 
 
@@ -115,7 +118,7 @@ def detrend(x, method=None, n=None, t=None, **kws):
         # return poly(x, n, t)
 
     if method == 'smooth':
-        return x - smoother(x, n)
+        return x - sm.smooth(x, n)
 
         # for loop?
         # return smooth(x, **kws)

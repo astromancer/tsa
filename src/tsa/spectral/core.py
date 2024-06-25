@@ -80,81 +80,18 @@ def fft_power(y, axis=0):
 # def cross_spectrum(signalA, signalB):
 
 
-def resolve_nwindow(nwindow, split, n, dt):
-    """
-    Convert semantic `nwindow` value to integer
+# def prepare_signal(signal, t, dt, gaps):
 
-    Parameters
-    ----------
-    nwindow : int or str
-        [description]
-    split : [type]
-        [description]
-    t : [type]
-        [description]
-    dt : [type]
-        [description]
+#     is_masked = np.ma.is_masked(signal)
+#     logger.info('Input time series contains masked data.')
 
-    Examples
-    --------
-    >>> 
+#     # Interpolate missing data
+#     # NOTE: have to do this before allocating nwindow since len(t) may change
+#     if gaps:
+#         fillmethod, option = gaps
+#         t, signal = fill_gaps(t, signal, dt, fillmethod, option)
 
-    Returns
-    -------
-    [type]
-        [description]
-
-    Raises
-    ------
-    NotImplementedError
-        [description]
-    NotImplementedError
-        [description]
-    """
-    if nwindow is None:
-        return n if split is None else n // int(split)
-
-    if isinstance(nwindow, str):
-        return windowing.resolve_size()(nwindow, dt)
-
-    return int(nwindow)
-
-
-def resolve_overlap(nwindow, noverlap, dt=None):
-    """
-    Convert semantic `noverlap` to integer value.
-
-    Parameters
-    ----------
-    nwindow : [type]
-        [description]
-    noverlap : [type]
-        [description]
-
-    Examples
-    --------
-    >>> 
-
-    Returns
-    -------
-    [type]
-        [description]
-    """
-    noverlap = windowing.resolve_size(noverlap, nwindow, dt)
-
-    if noverlap > nwindow:
-        raise ValueError(f'Size cannot be larger than {noverlap} > {nwindow}')
-
-    if noverlap == nwindow:
-        noverlap -= 1  # Maximal overlap!
-        warn('Specified overlap equals window size. Adjusting to '
-             f'maximal {noverlap=}')
-
-    # negative overlap works like negative indexing! :)
-    if noverlap < 0:
-        noverlap += nwindow
-
-    return noverlap
+#     return t, signal
 
 
 def resolve_padding(nwindow, dt, args):

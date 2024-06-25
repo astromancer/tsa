@@ -8,7 +8,7 @@ import numpy as np
 from recipes.array.fold import resolve_size
 
 # relative
-from ..windowing import get_window
+from .. import window as wdw
 from . import tv
 
 
@@ -27,7 +27,7 @@ class KernelSmoother:
             return x
 
         # get window values
-        window = get_window(self.window, wsize)
+        window = wdw.resolve.array(self.window, wsize)
 
         # pad array symmetrically at both ends
         s = np.ma.concatenate([x[wsize - 1:0:-1], x, x[-1:-wsize:-1]])
@@ -66,13 +66,9 @@ class KernelSmoother:
         return x, wsize
 
 
-def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
-    # TODO:  Docstring
-    # TODO: smooth (filter) in timescale (use astropy.units?)
-
-    # todo: compare astropy smoother ??
+def smooth(x, wsize=11, window='hanning', fill=None, output_masked=None):
     """
-    Generic smoothing routine able to handle masked arrays
+    Generic smoothing routine able to handle masked arrays.
 
     Parameters
     ----------
@@ -86,6 +82,10 @@ def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
     -------
 
     """
+    # TODO:  Docstring
+    # TODO: smooth (filter) in timescale (use astropy.units?)
+
+    # todo: compare astropy smoother ??
 
     if x.ndim != 1:
         raise ValueError('`smoother` only accepts 1D arrays.')
@@ -98,7 +98,7 @@ def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
         return x
 
     # get the window values
-    window = get_window(window, wsize)  # window values
+    window = wdw.resolve.array(window, wsize)  # window values
 
     # pad array symmetrically at both ends
     s = np.ma.concatenate([x[wsize - 1:0:-1], x, x[-1:-wsize:-1]])
@@ -133,3 +133,7 @@ def smoother(x, wsize=11, window='hanning', fill=None, output_masked=None):
 
     # return array that has same size as input array
     return y[pl:-ph + 1]
+
+
+# alias
+smoother = smooth

@@ -417,7 +417,7 @@ def get_line_colours(n, colours, cmap):
 
 def get_axes_labels(axes_labels):
     if (axes_labels is None) or (len(axes_labels) == 0):
-        return CONFIG.axes_labels.values()
+        return CONFIG.axes.labels.values()
 
     if len(axes_labels) != 2:
         raise ValueError('Invalid axes labels')
@@ -431,7 +431,7 @@ def get_axes_labels(axes_labels):
 
 def uncertainty_contours(ax, t, signal, stddev, styles, **kws):
     # NOTE: interpret uncertainties as stddev of distribution
-    from tsa.smoothing import smoother
+    from tsa.smooth import smoother
 
     # preserve colour cycle
     sigma = 3
@@ -467,7 +467,7 @@ class TimeSeriesPlot(Interface):
 
     # TODO: evolve to multiprocessed TS plotter.
 
-    def __init__(self, title='', hist=(), plims=CONFIG.plims,
+    def __init__(self, title='', hist=(), plims=CONFIG.axes.plims,
                  colors=None, cmap=None, max_points=1e4, **kws):
 
         self.parent = None

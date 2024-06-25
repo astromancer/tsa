@@ -25,7 +25,7 @@ from scipy.sparse import csc_matrix, eye, lil_matrix
 from recipes.io import load_memmap
 
 # relative
-from ..windowing import MovingWindowAnalysis
+from ..window import MovingWindowAnalysis
 
 
 # ---------------------------------------------------------------------------- #
