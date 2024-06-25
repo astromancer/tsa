@@ -9,6 +9,7 @@ from loguru import logger
 
 # local
 from recipes import io
+from recipes.iter import cofilter
 
 # relative
 from . import txt
@@ -50,6 +51,7 @@ SUPPORTED = tuple(x.value for x in SupportedFileType)
 
 # ---------------------------------------------------------------------------- #
 class Reader:
+
     txt = staticmethod(txt.read)
 
     def __call__(self, filename, hdu=None, **kws):
@@ -67,16 +69,17 @@ class Reader:
         flux = io.load_memmap(filename)['flux']
         return hdu.t.bjd, flux['value'][:, order], flux['sigma'][:, order]
 
-    def npz(self, filename):
+    def npz(self, filename, hdu=None, fields=('index', 'value', 'sigma')):
+
         data = np.load(filename)
-        t, y, σ = tuple(data[field] for field in ('t', 'counts', 'sigma', 'flag'))
+        index, value, *sigma = tuple(data.get(field, None) for field in fields)
 
         if (flag := data.get('flag', None)) is not None:
-            assert len(flag) == len(y)
+            assert len(flag) == len(value)
             flag = flag.astype(bool)
-            y = np.ma.MaskedArray(y, flag)
-            
-        return t, y, σ
+            value = np.ma.MaskedArray(value, flag)
+
+        return index, value, *sigma
 
 
 # Singleton
@@ -84,32 +87,36 @@ read = Reader()
 
 # --------------------------------------------------------------------------- #
 
+
 class Writer:
 
-    def __call__(self, filename, t, counts, std, **kws):
+    txt = staticmethod(txt.write)
+
+    def __call__(self, filename, index, value, sigma, **kws):
         filename = Path(filename)
         method = getattr(self, SupportedFileType(filename).value)
-        return method(filename, t, counts, std, **kws)
+        return method(filename, index, value, sigma, **kws)
 
-    def npy(self, filename, t, counts, std, mask=None, **kws):
+    def npy(self, filename, index, value, sigma, mask=None, **kws):
 
-        if np.ma.isMA(counts) or np.ma.isMA(std):
-            mask = np.ma.getmaskarray(counts) | np.ma.getmaskarray(std)
+        if np.ma.isMA(value) or np.ma.isMA(sigma):
+            mask = np.ma.getmaskarray(value) | np.ma.getmaskarray(sigma)
 
         logger.info('Saving light curve data ({} rows, {} sources, {} masked '
                     'points{}) to file: {}',
-                    len(t), len(counts), (0 if mask is None else mask.sum()),
+                    len(index), len(value), (0 if mask is None else mask.sum()),
                     '', filename)
 
         # stack data
-        data = stack_arrays(t, counts, std, mask)
+        data = stack_arrays(index, value, sigma, mask)
 
         return np.save(filename, data)
 
-    def npz(self, filename, t, counts, std, flag=None, **kws):
-        np.savez_compressed(filename,
-                            t=t, counts=counts, std=std,
-                            **({'flag': flag} if flag is not None else {}))
+    def npz(self, filename, index, value, **kws):
+
+        # filter `None` values
+        kws = dict(zip(*cofilter(None, kws.values(), kws.keys())[::-1]))
+        np.savez_compressed(filename, index=index, value=value, **kws)
 
 
 # Singleton
@@ -119,16 +126,16 @@ write = Writer()
 # ---------------------------------------------------------------------------- #
 # Utility function
 
-def stack_arrays(t, flx, std, flag=None):
+def stack_arrays(index, flx, sigma, flag=None):
     """
     Stack light curve data into table for writing to file. Measurements for
     each star (Flux, σFlux, ...) columns are horizontally stacked.
 
     Parameters
     ----------
-    t
+    index
     flx
-    std
+    sigma
     flag
 
     Returns
@@ -136,15 +143,15 @@ def stack_arrays(t, flx, std, flag=None):
 
     """
     nstars = len(flx)
-    assert len(std) == nstars
+    assert len(sigma) == nstars
 
-    components = [flx, std]
+    components = [flx, sigma]
     if flag is not None:
         assert len(flag) == nstars
         flag = flag.astype(int)
         components.append(flag)
 
-    tbl = [t]
+    tbl = [index]
     for columns in zip(*components):
         tbl.extend(columns)
 
