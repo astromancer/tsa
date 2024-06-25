@@ -21,6 +21,7 @@ from recipes.oo.property import CachedProperty
 
 # relative
 from ..smoothing import KernelSmoother, tv
+from . import io
 from .interface import Interface
 from .plotting import TimeSeriesPlot
 
@@ -53,6 +54,7 @@ from .plotting import TimeSeriesPlot
 #     return cov(x, y, w) / np.sqrt(cov(x, x, w) * cov(y, y, w))
 
 # ---------------------------------------------------------------------------- #
+
 
 def _resolve_stat(stat, obj, lookup, *args):
     if stat is True:
@@ -300,6 +302,21 @@ class TimeSeries(LoggingMixin):
 
         # times & signals given
         return t_or_x, x, u
+
+    # ------------------------------------------------------------------------ #
+    # IO
+    @classmethod
+    def read(cls, filename, *_, **__):
+        return cls(*io.read(filename))
+
+    # alias
+    load = read
+
+    def write(self, filename, **kws):
+        return io.write(filename, *self, **kws)
+
+    # alias
+    save = write
 
     # Time
     # ------------------------------------------------------------------------ #
@@ -684,16 +701,17 @@ class UnivariateDescriptor:
     def __set_name__(self, owner, name):
         # set the class that uses this descriptor as `multivariate` attribute on
         # instance of univariate class
-        logger.debug('Assigned {} as multivariate class of {!r}.',
-                     owner, self.kls)
-        self.multivariate = owner
+        if self.kls:
+            logger.debug('Assigned {} as multivariate class of {!r}.',
+                         owner, self.kls)
+            self.multivariate = owner
 
 
 class MultiVariate:
     # support for simultaneous multivariate data
 
     univariate = UnivariateDescriptor(None)
-        
+
     def __init_subclass__(cls):
         for parent in set(cls.__bases__) - {MultiVariate}:
             if issubclass(parent, TimeSeries):
@@ -727,8 +745,6 @@ class MultiVariate:
         raise TypeError(
             f'Invlaid univariate class {kls.__name__} for multivariate '
             f'{type(self).__name__}.')
-
-    # def __iter__(self):
 
 
 class MultiVariateTimeSeries(MultiVariate, TimeSeries):

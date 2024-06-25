@@ -1,19 +1,49 @@
+io.txt:
+    title:  Time Series for {}
+
+    # columns [name, unit, description]
+    columns:
+        time: 
+            [Time, '', Time stamp]
+            # [sidt, h  Sidereal time in seconds since midnight]
+        value: 
+            [x, '', Time series value]
+        sigma:   
+            [σ, '', Standard deviation uncertainty of value]
+        outlier: 
+            [oflag, '', Outlier flag]
+
+    precision:  3   # significant figures
+
 
 ts:
+    # time series plot parametes
     plotting:
         timescale:    s
         start:        null
 
-        axes_labels:
-            x:  ['t (s)', '']  # bottom and top x-axes
-            y:  Counts
+        figure:
+            size:           [14, 8]
+            margins:
+                top:        0.81
+                bottom:     0.1
+                left:       0.065
+                right:      0.94
 
-        # TODO: axes_label_position: (left right center <>^)
-        twinx:        null  # Top x-axis display format
-        # xscale: 'linear'
-        # yscale: 'linear'
-        plims:      [[-1, 101],   # x-axis
-                     [-1, 101]]   # y-axis
+        axes:
+            plims:          [-0.1, 99.99]
+            labels:
+                # TODO: axes_label_position: (left right center <>^)
+                x:
+                    top:        Time (UTC)
+                    bottom:     Δt (s)
+                    pad:        -17.5
+                    ticks:
+                        rotation:   45
+                y:
+                    left:       Relative Flux
+
+            twinx:        null  # Top x-axis display format
 
         line:
             ls:             '-'
@@ -43,3 +73,16 @@ ts:
             framealpha:     0.25
             numpoints:      1
             markerscale:    3
+
+spectral:
+    io.txt:
+        title:  Spectral density estimate for {}
+
+        # columns [name, unit, description]
+        columns:
+            time: 
+                [Frq, 'Hz', Frequency]
+            value: 
+                [Power, '', Power]
+
+        precision:  3   # significant figures
