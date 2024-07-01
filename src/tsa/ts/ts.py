@@ -194,19 +194,17 @@ class TimeSeries(MeasurementSequence):
     # Spectral estimators
     # ------------------------------------------------------------------------ #
 
-    def periodogram(self, window=None, detrend=None, pad=None, normalize=None, **kws):
+    def periodogram(self, window=None, detrend=None, pad=None, norm=None, **kws):
         from tsa.spectral import Periodogram
 
-        return Periodogram(self.t, self.x, window, detrend, pad, normalize, **kws)
+        return Periodogram(window, detrend, pad, norm).fit(self.t, self.x, **kws)
 
     def spectrogram(self, nwindow, noverlap=0, window='hanning', detrend=None,
-                    pad=None, split=None, normalize=False, **kws):
+                    pad=None, split=None, norm=False, **kws):
         from tsa.spectral import Spectrogram
 
-        return Spectrogram(self.t, self.x,
-                           nwindow, noverlap,
-                           window, detrend,
-                           pad, split, normalize, **kws)
+        return Spectrogram(nwindow, noverlap, window, detrend,
+                           pad, split, norm).fit(self.t, self.x, **kws)
 
     def correlogram(self, max_lag=None, method=None, njobs=-1):
 
