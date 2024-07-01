@@ -184,7 +184,6 @@ def _parse_input(data, labels):
 
         # check for structured data (dict keyed on labels and containing data)
         if isinstance(signals, dict):
-            #
             yield from _parse_input(list(zip(*signals.values())),
                                     list(signals.keys()))
             return
@@ -219,14 +218,14 @@ def get_data(data, labels, thin=1, max_points=None, t0=None, tscale=None):
 
     # parse input args: times, signals, y_err, x_err
     data = resolve_data(data, labels)
-
+    
     # zip_longest in case errors or times are empty sequences
     data = itt.zip_longest(*data, fillvalue=())
-
+    
     # performance tradeoff: thin data since plotting many point is a bottleneck
     data = _thin_data(data, thin, max_points)
 
-    #
+    # rescale
     return _scale_time_vectors(data, t0, tscale)
 
 
@@ -321,7 +320,7 @@ def _thin_data(data, thin, max_points):
 
     if not max_points and (thin != 1):
         logger.debug('Thinning plot data by {}.', thin)
-
+    
     for *vectors, label in data:
         yield (*_thinner(thin, *vectors), label)
 
@@ -330,8 +329,8 @@ def _thinner(thin, x, y, y_err, x_err):
     # thin out
     yield x[::thin]
     yield y[::thin]
-    yield y_err[::(thin, 1)[is_null(y_err)]]
-    yield x_err[::(thin, 1)[is_null(x_err)]]
+    yield (y_err if is_null(y_err) else y_err[::thin])
+    yield (x_err if is_null(x_err) else x_err[::thin])
 
 
 def _scale_time_vectors(data, t0, tscale):
@@ -569,7 +568,7 @@ class TimeSeriesPlot(Interface):
                                f'\n{x = },\n{σx = },\n{y = },\n{σy = }')
             )
 
-            self.plot(x, y, σy, σx, label, thin, show_masked, show_hist,
+            self.plot(x, y, σy, σx, label, show_masked, show_hist,
                       styles=styles, **kws)
 
         # set auto-scale limits
@@ -638,7 +637,7 @@ class TimeSeriesPlot(Interface):
 
         return fig, ax, hax
 
-    def plot(self, x, y, y_err, x_err, label=None, thin=1,
+    def plot(self, x, y, y_err, x_err, label=None, #thin=1,
              show_masked=False, show_hist=False, relative_time=False,
              styles=None, **kws):
 
@@ -648,9 +647,9 @@ class TimeSeriesPlot(Interface):
         # clean
         data = sanitize_data(x, y, y_err, x_err)
 
-        # thin out
-        if (thin := int(thin)) > 1:
-            data = _thinner(thin, *data)
+        # # thin out
+        # if (thin := int(thin)) > 1:
+        #     data = _thinner(thin, *data)
 
         # plot
         kws = {**dict(label=(label or None), zorder=self.zorder0), **kws}
