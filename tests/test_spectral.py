@@ -45,11 +45,28 @@ def random_signal(n, mean):
 )
 def test_periodogram(signal):
     # check parceval for even and odd signals
-    frq, pwr = Periodogram(signal)
+    pg = frq, pwr, _ = Periodogram.fit(signal)
+    _test_pg(signal, pwr)
+    
+def _test_pg(signal, pwr):
     check_parceval(signal, pwr)
     check_DC(signal, pwr)
     check_var_rms(signal, pwr)
+    
 
+@pytest.mark.parametrize(
+    'signal',
+    [random_signal(2**10, 1e4),
+     random_signal(2**10 - 1, 1e4)]
+)
+def test_periodogram_norm(signal):
+    # check parceval for even and odd signals
+    pg = Periodogram.fit(signal, norm='psd')
+    scale = pg.norm.scale
+    pg.norm = 'leahy'
+    assert pg.norm.scale != scale
+    _test_pg(signal, pg.power)
+    
 
 # def test_tfr():
 #     # generate data
