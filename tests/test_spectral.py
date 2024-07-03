@@ -7,9 +7,12 @@ import numpy as np
 from tsa.spectral import Periodogram
 
 
-np.random.seed(123)
+# ---------------------------------------------------------------------------- #
+def random_signal(n, mean, stddev=1):
+    return mean + np.random.randn(n) * stddev
 
 
+# ---------------------------------------------------------------------------- #
 def check_parceval(signal, periodogram):
     # Parceval's theorem
     tp_signal = np.square(signal).sum()
@@ -34,10 +37,7 @@ def check_var_rms(signal, periodogram):
     return np.allclose(var, rms_pwr)
 
 
-def random_signal(n, mean):
-    return np.random.randn(n) + mean
-
-
+# ---------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     'signal',
     [random_signal(2**10, 1e4),
@@ -47,12 +47,13 @@ def test_periodogram(signal):
     # check parceval for even and odd signals
     pg = frq, pwr, _ = Periodogram.fit(signal)
     _test_pg(signal, pwr)
-    
+
+
 def _test_pg(signal, pwr):
     check_parceval(signal, pwr)
     check_DC(signal, pwr)
     check_var_rms(signal, pwr)
-    
+
 
 @pytest.mark.parametrize(
     'signal',
@@ -66,7 +67,7 @@ def test_periodogram_norm(signal):
     pg.norm = 'leahy'
     assert pg.norm.scale != scale
     _test_pg(signal, pg.power)
-    
+
 
 # def test_tfr():
 #     # generate data

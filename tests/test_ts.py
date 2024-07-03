@@ -1,53 +1,98 @@
 
 # third-party
+import pytest
 import numpy as np
 
 # local
 from tsa.ts import TimeSeries
-from recipes.testing import PASS, Expected, Throws, mock
 
 
 # pylint: disable=missing-function-docstring
 
-# generate some data
-np.random.seed(666)
 
-n = 50
-t = np.linspace(0, 2 * np.pi, n)
-y = np.sin(3 * t)
-e = np.random.rand(n)
-m = np.random.rand(n) > 0.8
-ym = np.ma.array(y, mask=m)
-# np.cos(10*t),
-#  np.cos(10 * np.sqrt(t))]
+# ---------------------------------------------------------------------------- #
 
-n2 = 100
-t2 = np.linspace(0, np.pi, n2)
-y2 = np.random.randn(3, n2)
+def sinudoidal(size, interval=(0, 2 * np.pi), period=1, amplitude=1, phase=0,
+               noise=1, mask=0.8):
+
+    # generate some data
+    size = np.atleast_1d(size)
+    t = np.linspace(*interval, size[0])
+    y = amplitude * np.sin(np.atleast_2d(period).T * t + phase)
+    e = noise * np.random.rand(*size)
+
+    m = np.random.randn(*size) > mask
+    ym = np.ma.array(y.T, mask=m).squeeze()
+
+    return t, ym, e
 
 
-#
+# ---------------------------------------------------------------------------- #
 
-# class TestTimeSeries:
+# data
+@pytest.fixture(params=[
+    # univariate
+    dict(size=50, period=3, amplitude=2),
+    # multivariate
+    dict(size=(100, 3), period=[1, 2, 3])
+])
+def case_data(request):
+    return sinudoidal(**request.param)
 
-test_init = Expected(TimeSeries)({
+
+def test_init(case_data):
+    #
+    t, ym, e = case_data
+    y = ym.data
+
     # basic, implicit time index
-    mock.TimeSeries(y):                             PASS,
-    # multivariate, implicit time index
-    mock.TimeSeries(y2):                            PASS,
+    TimeSeries(y)
+
     # explicit time index
-    mock.TimeSeries(t, y):                          PASS,
+    TimeSeries(t, y)
+
     # with uncertainties
-    mock.TimeSeries(t, y, e):                       PASS,
+    TimeSeries(t, y, e)
+
     # masked data
-    mock.TimeSeries(t, ym, e):                      PASS,
+    TimeSeries(t, ym, e)
+
+
+def test_raises(case_data):
+    t, ym, e = case_data
+
+    # unequal array sizes
+    with pytest.raises(ValueError):
+        TimeSeries(t, ym, [1])
+
     # negative uncertainties not allowed
-    mock.TimeSeries(t, y, -np.ones_like(y)):        Throws(ValueError)
-})
+    with pytest.raises(ValueError):
+        TimeSeries(t, ym, -np.ones_like(ym))
 
 
-def test_thin():
-    TimeSeries(t, ym, e).plot(thin=3)
+@pytest.mark.mpl_image_compare(baseline_dir='images/ts/',
+                               style='default')
+def test_plot(case_data):
+    ts = TimeSeries(*case_data)
+    tsp = ts.plot()
+    return tsp.figure
+
+# ---------------------------------------------------------------------------- #
+
+# test_init = Expected(TimeSeries)({
+#     # basic, implicit time index
+#     mock.TimeSeries(y):                             PASS,
+#     # multivariate, implicit time index
+#     mock.TimeSeries(y2):                            PASS,
+#     # explicit time index
+#     mock.TimeSeries(t, y):                          PASS,
+#     # with uncertainties
+#     mock.TimeSeries(t, y, e):                       PASS,
+#     # masked data
+#     mock.TimeSeries(t, ym, e):                      PASS,
+#     # negative uncertainties not allowed
+#     mock.TimeSeries(t, y, -np.ones_like(y)):        Throws(ValueError)
+# })
 
 
 # @pytest.mark.mpl_image_compare(baseline_dir = 'images',

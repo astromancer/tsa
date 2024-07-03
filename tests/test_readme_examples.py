@@ -13,13 +13,7 @@ from pathlib import Path
 
 # third-party
 import pytest
-import numpy as np
 import matplotlib.pyplot as plt
-
-# local
-from tsa.ts import TimeSeries
-from tsa.spectral import Periodogram
-from tsa.ts.generate import Harmonic
 
 
 # ---------------------------------------------------------------------------- #
@@ -42,11 +36,6 @@ class get_name:
     def __call__(self, val):
         return next(self.count)
 
-# def get_figure(namespace):
-#     for obj in reversed(namespace.values()):
-#         if isinstance(obj, (TimeSeries, Periodogram)):
-#             return obj.fig
-
 
 @pytest.fixture(params=itt.islice(get_readme_examples(), 3),
                 ids=get_name())
@@ -54,7 +43,7 @@ def readme_code(request):
     return request.param
 
 
-@pytest.mark.mpl_image_compare(baseline_dir='images', style='default')
+@pytest.mark.mpl_image_compare(baseline_dir='images/readme', style='default')
 def test_readme_example(readme_code):
     locals_ = {}
     code = (readme_code + '\n'
