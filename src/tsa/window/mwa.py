@@ -5,6 +5,7 @@ import numpy as np
 # local
 from recipes.array import fold
 from recipes.concurrency import Executor
+from recipes.oo.represent import Represent
 
 # relative
 from . import resolve
@@ -13,9 +14,12 @@ from . import resolve
 # ---------------------------------------------------------------------------- #
 
 class MovingWindowAnalysis(Executor):
-    """Base class for sliding/rolling/moving window analysis."""
+    """Base class for sliding/rolling/moving window analysis tasks."""
 
     __slots__ = ('n', 'nwindow', 'noverlap', 'n_repeats', 'weight_kernel', 'weights')
+    __repr__ = Represent(ignore=('n_repeats', 'jobname', 'backend', 'nfail'))
+
+    # @api.synoonyms({'(window|taper)': 'weight_kernel'})
 
     def __init__(self, nwindow, noverlap='25%', weight_kernel=None,
                  jobname=None, backend='multiprocessing', xfail=10, **kws):
@@ -28,9 +32,6 @@ class MovingWindowAnalysis(Executor):
         self.noverlap = noverlap
         self.weight_kernel = weight_kernel
         self.weights = None
-
-    def __repr__(self, ignore=('n_repeats', 'jobname', 'backend',  'nfail'), **kws):
-        return super().__repr__(ignore=ignore, **kws)
 
     def __call__(self, t, x, njobs=-1, **kws):
 

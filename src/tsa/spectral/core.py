@@ -21,9 +21,10 @@ from recipes.array import fold
 from recipes.config import ConfigNode
 from recipes.oo.property import Alias
 from recipes.functionals import raises
+from recipes.oo.slots import SlotHelper
 from recipes.concurrency import Executor
 from recipes.logging import LoggingMixin
-from recipes.oo.slots import SlotHelper
+from recipes.oo.represent import Represent
 from recipes.oo.property import cached_property
 
 # relative
@@ -363,15 +364,12 @@ class PowerSpectrum(Spectrum):
     norm = Normalizer()
     estimator = UniformFFT
 
+    __repr__ = Represent(['n'], maybe=['norm.name'], remap={'norm.name': 'norm'})
+
     def __init__(self, frq, power, sigma=None, /, norm=False):
         super().__init__(frq, power, sigma)
         self.norm = norm
 
-    def __repr__(self):
-        s = super().__repr__()
-        if norm := self.norm.name:
-            return f'{s[:-1]}, norm={norm})'
-        return s
 
     @classmethod
     def fit(cls, *args, norm=None, **kws):

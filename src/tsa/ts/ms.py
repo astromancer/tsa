@@ -17,7 +17,7 @@ from loguru import logger
 from recipes.oo import slots
 from recipes.flow import Emit
 from recipes.logging import LoggingMixin
-from recipes.oo.property import Alias, CachedProperty
+from recipes.oo.property import Alias, cached_property
 
 # relative
 from .. import io
@@ -87,9 +87,11 @@ class UnivariateDescriptor:
 
 
 class MultiVariate:
-    # support for simultaneous multivariate data
+    # Mixin for simultaneous multivariate data
 
     univariate = UnivariateDescriptor(None)
+
+    __repr__ = slots.Represent(['n', 'm'], enclose='')
 
     def __init_subclass__(cls):
         for parent in set(cls.__bases__) - {MultiVariate}:
@@ -99,10 +101,6 @@ class MultiVariate:
                 return
 
         raise TypeError(f'No univariate counterpart to {cls}.')
-
-    def __repr__(self):
-        # .replace(',', ' ')
-        return f'{type(self).__name__}(n={self.n:d}, m={self.m:d})'
 
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -125,14 +123,16 @@ class MultiVariate:
             f'Invlaid univariate class {kls.__name__} for multivariate '
             f'{type(self).__name__}.')
 
-# ---------------------------------------------------------------------------- #
 
+# ---------------------------------------------------------------------------- #
 
 class MeasurementSequence(LoggingMixin):
     """
     A basic univariate measurement sequence with optional uncertainties.
     Base class for `TimeSeries` and `SpectralEstimate` classes.
     """
+
+    __repr__ = slots.Represent(['n'], enclose='')
 
     # ------------------------------------------------------------------------ #
     # Constructors
@@ -202,8 +202,7 @@ class MeasurementSequence(LoggingMixin):
     # aliases
     load = Alias('read')
     save = Alias('write')
-    
-    
+
     # Time
     # ------------------------------------------------------------------------ #
     @property
@@ -217,8 +216,7 @@ class MeasurementSequence(LoggingMixin):
             return
 
         index = np.asanyarray(index).squeeze()
-        self._check_against_value(index, 'index')
-        self._index = index
+        self._index = self._check_against_value(index, 'index')
 
     # Data
     # ------------------------------------------------------------------------ #
@@ -299,9 +297,6 @@ class MeasurementSequence(LoggingMixin):
         return self._value.shape[1]
 
     # ------------------------------------------------------------------------ #
-    def __repr__(self):
-        return f'{type(self).__name__}(n={self.n:d})'  # .replace(',', ' ')
-
     def __getitem__(self, key):
         data = self._value[key]
         kls = MeasurementSequence if len(data) else tuple
@@ -309,7 +304,6 @@ class MeasurementSequence(LoggingMixin):
                    data,
                    None if self.u is None else self.sigma[key])
 
-    # ------------------------------------------------------------------------ #
     def __len__(self):
         return len(self._value)
 
@@ -432,7 +426,7 @@ class MeasurementSequence(LoggingMixin):
 
     # Statistics
     # ------------------------------------------------------------------------ #
-    @CachedProperty
+    @cached_property
     def mean(self):
         # In standard statistical practice, ``ddof=1`` provides an unbiased
         # estimator of the variance of a hypothetical infinite population.
@@ -440,12 +434,12 @@ class MeasurementSequence(LoggingMixin):
         # normally distributed variables.
         return self.value.mean(0)
 
-    @CachedProperty(depends_on=mean)
+    @cached_property(depends_on=mean)
     def var(self):
         # unbiased estimate of population variance
         return self.value.var(0, ddof=1)
 
-    @CachedProperty(depends_on=var)
+    @cached_property(depends_on=var)
     def std(self):
         return np.sqrt(self.var)
 
