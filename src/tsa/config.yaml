@@ -1,23 +1,25 @@
+# ---------------------------------------------------------------------------- #
 io.txt:
     title:  Time Series for {}
 
     # columns [name, unit, description]
     columns:
-        time: 
+        index: 
             [Time, '', Time stamp]
             # [sidt, h  Sidereal time in seconds since midnight]
         value: 
-            [x, '', Time series value]
+            [x, '', Data value]
         sigma:   
-            [σ, '', Standard deviation uncertainty of value]
+            [σ, '', Standard deviation uncertainty of data value]
         outlier: 
             [oflag, '', Outlier flag]
 
-    precision:  3   # significant figures
+    precision:  5   # significant figures
 
 
+# ---------------------------------------------------------------------------- #
 ts:
-    # time series plot parametes
+    # time series plot parameters
     plotting:
         timescale:    s
         start:        null
@@ -74,6 +76,7 @@ ts:
             numpoints:      1
             markerscale:    3
 
+# ---------------------------------------------------------------------------- #
 spectral:
     io.txt:
         title:  Spectral density estimate for {}
@@ -86,3 +89,83 @@ spectral:
                 [Power, '', Power]
 
         precision:  3   # significant figures
+
+    tfr:
+        ts: 
+            color:  g
+            ms:     1.5
+
+            axes:
+                x:
+                    ticks:
+                        which:          both
+                        top:            True
+                        labeltop:       True
+                        labelbottom:    False
+                        direction:      inout
+                        pad:            0
+                y:  
+                    label:              Signal
+                    ticks:
+                        which:          both
+                        right:          True
+                        direction:      inout
+
+        sde:
+            color: 'g'
+            color_cycle:    [c, b, m, g, y, orange]
+
+            axes:
+                ticks:
+                    which:          both
+                    left:           False
+                    labelleft:      False
+                    right:          True
+                    bottom:         False
+                    labelbottom:    False  # cbar gets these
+                    top:            True
+                    direction:      inout
+
+                x:
+                    label:          Time (s)
+                y:
+                    label:          Frequency (Hz)
+
+                twin:
+                    y:
+                        label:
+                            text:   Period (s)
+                            pad:    50
+                        ticks:    
+                            left:       False
+                            labelleft:  False
+                            right:      False
+                
+        hatch:  
+            facecolor:  none
+            edgecolor:  r
+            alpha:      0.65
+            linewidth:  1
+            hatch:      //
+
+        hover:
+            color:          r
+            ts:   
+                alpha:      0.35
+            map:  
+                lw:         1
+                ls:         --
+            sde:
+                alpha:      0.65
+                lw:         1.5
+
+        figure:
+            size:           [11, 6.53]
+
+            margins:
+                hspace:     0.02
+                wspace:     0.005
+                top:        0.925
+                bottom:     0.08
+                left:       0.05
+                right:      0.915  # space for cbar ticks

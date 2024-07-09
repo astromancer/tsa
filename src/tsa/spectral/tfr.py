@@ -7,8 +7,9 @@ Plotting interactive Time Frequency Representations of Time Series data
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.image as mimage
-from matplotlib import gridspec, ticker
+from matplotlib import ticker
 from matplotlib.patches import Rectangle
+from matplotlib.gridspec import GridSpec
 from matplotlib.transforms import blended_transform_factory as btf
 
 # local
@@ -26,6 +27,16 @@ from ..smooth import smooth
 # FIXME: unintended highlight when zooming.
 # FIXME: immediately new highlight after selection
 
+from recipes.config import ConfigNode
+
+
+# ---------------------------------------------------------------------------- #
+# Module config
+CONFIG = ConfigNode.load_module(__file__)
+
+# ---------------------------------------------------------------------------- #
+
+
 def format_coord_spec(x, y):
     # x = ax.format_xdata(x)
     # y = ax.format_ydata(y)
@@ -38,6 +49,8 @@ def format_coord_spec(x, y):
     # return 'f = {}; p = {};\ty = {}'.format( x, p, y )
 
 
+# ---------------------------------------------------------------------------- #
+
 class AxesContainer(AttrReadItem):
     pass
 
@@ -49,25 +62,14 @@ class ArtistContainer(AttrReadItem):
 class TimeFrequencyBase:
     """Base class for Time Frequency plots"""
 
-    ts_props = dict(color='g', ms=1.5)
-    pg_props = dict(color='g')
-    cb_props = {}
-    hatch_props = dict(facecolor='none',
-                       edgecolor='r',
-                       alpha=0.65,
-                       linewidth=1,
-                       hatch='//')
-
     def __init__(self, spectrogram, ts=True, pg=True, info=False, cmap=None,
                  percentiles=(25, 50, 75)):
         """ """
         # assert isinstance(spectrogram, Spectrogram)
         self.spec = spectrogram
 
-        ts_props = {**self.ts_props,
-                    **(ts if isinstance(ts, dict) else {})}
-        pg_props = {**self.pg_props,
-                    **(ts if isinstance(pg, dict) else {})}
+        ts_config = {**CONFIG.ts, **(ts if isinstance(ts, dict) else {})}
+        sde_config = {**CONFIG.sde, **(pg if isinstance(pg, dict) else {})}
 
         # cmap = plt.get_cmap(cmap)
         self.q_levels = np.array(percentiles)
@@ -75,14 +77,14 @@ class TimeFrequencyBase:
         self.axes = AxesContainer(axes)
         self.info_text = self.get_info_text() if info else None
 
-        art = self.plot(cmap, ts_props, pg_props)
+        art = self.plot(cmap, ts_config, sde_config)
         self.art = ArtistContainer(art)
 
         self.background = None
         self._need_save = False
 
     def setup_figure(self, show_ts=True, show_spec=True, show_info=True,
-                     figsize=(11, 6.53), gridspec_kws=None):
+                     figsize=CONFIG.figure.size, gridspec_kws=()):
         """Setup figure geometry"""
 
         # TODO limit axes to lower 0 Hz??  OR hatch everything below this
@@ -92,16 +94,8 @@ class TimeFrequencyBase:
         # the upper MAYBE ask on SO??
 
         fig = plt.figure(figsize=figsize)
-        gs = gridspec.GridSpec(
-            100, 100,
-            **dict(gridspec_kws or {},
-                   hspace=0.02,
-                   wspace=0.005,
-                   top=0.925,
-                   bottom=0.08,
-                   left=0.05,
-                   right=0.915)  # space for cbar ticks
-        )
+        gs = GridSpec(100, 100,
+                      **dict(gridspec_kws or {}, **CONFIG.figure.margins))
 
         # optionally display various axes
         axes = AttrDict()
@@ -140,14 +134,10 @@ class TimeFrequencyBase:
         # setup_ticks
         if axes.ts:
             # set major/minor xticks invisible on light curve plot
-            axes.ts.tick_params(axis='x', which='both',
-                                top=True, labeltop=True,
-                                labelbottom=False,
-                                direction='inout', pad=0)
-            axes.ts.tick_params(axis='y', which='both',
-                                right=True, direction='inout')
+            axes.ts.tick_params(axis='x', **CONFIG.ts.axes.x.ticks)
+            axes.ts.tick_params(axis='y', **CONFIG.ts.axes.y.ticks)
 
-            axes.ts.set_ylabel('Signal')   # TODO: units!!!!
+            axes.ts.set_ylabel(CONFIG.ts.axes.y.label)   # TODO: units!!!!
             axes.ts.grid()
 
         # Get label for power values
@@ -158,21 +148,16 @@ class TimeFrequencyBase:
             # FIXME: ticks WRONG after zoom !
             axes.spec.parasite = axp = axes.spec.twinx()
             axp.yaxis.set_major_formatter(ReciprocalFormatter())
-            axp.yaxis.set_tick_params(left=False, labelleft=False,
-                                      right=False)
+            axp.yaxis.set_tick_params(**CONFIG.sde.axes.twin.y.ticks)
 
             # set yticks invisible on frequency spectum plot
             axes.spec.xaxis.offsetText.set_visible(False)
 
             # axes.spec.yaxis.set_tick_params()
-            axes.spec.tick_params(which='both',
-                                  left=False, labelleft=False,
-                                  right=True,
-                                  bottom=False, labelbottom=False,  # cbar gets these
-                                  top=True,
-                                  direction='inout')
+            axes.spec.tick_params(**CONFIG.sde.axes.ticks)
             axes.spec.yaxis.set_label_position('right')
-            axes.spec.set_ylabel('Period (s)', labelpad=50)
+            axes.spec.set_ylabel((label := CONFIG.sde.axes.twin.y.label).text,
+                                 labelpad=label.pad)
 
             # axes.spec.set_xlabel(cbar_label, labelpad=25)
             axes.spec.grid()
@@ -183,23 +168,24 @@ class TimeFrequencyBase:
             axes.cbar.yaxis.set_label_position('right')
             axes.cbar.set_ylabel(cbar_label)
 
-        axes.map.set_xlabel('Time (s)')
-        axes.map.set_ylabel('Frequency (Hz)')
+        axes.map.set_xlabel(CONFIG.sde.axes.x.label)
+        axes.map.set_ylabel(CONFIG.sde.axes.y.label)
 
         return fig, axes
 
-    def plot(self, cmap, ts_props=None, pg_props=None):
+    def plot(self, cmap, ts_config=(), sde_config=()):
 
         spec = self.spec
         frq, pwr = spec.frq, spec.power
-        valid = frq > spec.fRayleigh
-        # NOTE: we intentionally do not mask power values below fRayleigh, even
+        valid = frq > spec.f_rayleigh
+        # NOTE: we intentionally do not mask power values below f_rayleigh, even
         # though they are not physicaly meaningful because this often leads to
         # the appearance of a false "peak" at low frequencies.  Instead, we
         # hatch everything below the Rayleigh frequency.
 
         # guess reasonable colour limits
         plim = (0.25, 99.9)  # colour limits as percentile of power value
+
         clim = np.percentile(pwr[:, valid], plim)
 
         art = AttrDict()
@@ -232,20 +218,20 @@ class TimeFrequencyBase:
         # self.axes.map.set_xlim( t[0],t[-1] )
         # self.axes.map.set_ylim( frq[0],frq[-1] )
 
-        # hatch anything below self.fRayleigh
-        polycol = self.axes.map.fill_between(tlims, self.spec.fRayleigh,
-                                             **self.hatch_props)
+        # hatch anything below self.f_rayleigh
+        polycol = self.axes.map.fill_between(tlims, self.spec.f_rayleigh,
+                                             **CONFIG.hatch)
 
         if self.axes.ts:
             # Plot time series
             tsp = spec._ts.plot(self.axes.ts,
                                 # FIXME: use DEFAULT values
                                 plims=[(0, 100), (-1, 101)],
-                                errorbar=(ts_props or {}))
+                                errorbar=(ts_config or {}))
             self.axes.ts.xaxis.set_label_position('top')
 
         if self.axes.spec:
-            self.plot_pgram(pg_props, clim=clim)
+            self.plot_pgram(sde_config, clim=clim)
 
             # show colourbar
             tmp = self.axes.cbar.get_xlabel()
@@ -269,41 +255,40 @@ class TimeFrequencyBase:
         # TODO: MOVE TO SUBCLASS ?
         self.axes.map.callbacks.connect('xlim_changed', self.save_background)
         self.axes.map.callbacks.connect('ylim_changed', self.save_background)
-        self.axes.map.callbacks.connect(
-            'ylim_changed', self._set_parasite_ylim)
+        self.axes.map.callbacks.connect('ylim_changed', self._set_parasite_ylim)
 
         return art
 
-    def plot_pgram(self, pg_props=None, smoothing=5, clim=None):
+    def plot_pgram(self, sde_config=None, smoothing=5, clim=None):
         # Plot spectrum (median & inter-quartile range)
         pwr, frq = self.spec.power, self.spec.frq
         percentiles = np.percentile(pwr, self.q_levels, 0)
         ls = {50: '-'}
         art = {}
+        ax = self.axes.spec
         for q, p in zip(self.q_levels, percentiles):
-            art[f'pgram{q}'], = self.axes.spec.plot(
+            art[f'pgram{q}'], = ax.plot(
                 smooth(p, smoothing), frq, ls.get(q, ':'),
-                **(pg_props or {})
+                **(sde_config or {})
             )
 
         if clim is None:
             clim = (None, None)
         ylim = frq[[0, -1]]
-        self.axes.spec.set(xlim=clim, ylim=ylim)
-        self.axes.spec.parasite.set_ylim(ylim)  # FIXME
-        # self.axes.spec.set_xscale('log')
+        ax.set(xlim=clim, ylim=ylim)
+        ax.parasite.set_ylim(ylim)  # FIXME
+        # ax.set_xscale('log')
 
-        # hatch anything below self.fRayleigh
-        rinv = Rectangle((0, 0), 1, self.spec.fRayleigh,
-                         transform=btf(self.axes.spec.transAxes,
-                                       self.axes.spec.transData),
-                         **self.hatch_props)
-        self.axes.spec.add_patch(rinv)
+        # hatch anything below `self.f_rayleigh`
+        rinv = Rectangle((0, 0), 1, self.spec.f_rayleigh,
+                         transform=btf(ax.transAxes,
+                                       ax.transData),
+                         **CONFIG.hatch)
+        ax.add_patch(rinv)
 
         # connect callbacks for limit change
-        self.axes.spec.callbacks.connect('xlim_changed', self._set_clim)
-        self.axes.spec.callbacks.connect(
-            'ylim_changed', self._set_parasite_ylim)
+        ax.callbacks.connect('xlim_changed', self._set_clim)
+        ax.callbacks.connect('ylim_changed', self._set_parasite_ylim)
 
         return art
 
@@ -364,18 +349,10 @@ class TimeFrequencyBase:
 
 class HoverSegment(ArtistContainer):
 
-    props = {
-        'ts':   dict(alpha=0.35),
-        'map':  dict(lw=1,
-                     ls='--')
-    }
-    spec_props = dict(alpha=0.65,
-                      lw=1.5)
-
-    def __init__(self, axes, color='r', **kws):
+    def __init__(self, axes, color=CONFIG.hover.color, **kws):
         self.figure = axes.ts.figure
         # instantaneous spectrum
-        self.spectrum, = axes.spec.plot([], [], color, **self.spec_props)
+        self.spectrum, = axes.spec.plot([], [], color, **CONFIG.hover.sde)
 
         # window indicator on light curve axes
         # TODO:  show window shape
@@ -384,9 +361,8 @@ class HoverSegment(ArtistContainer):
             self[name] = rect = \
                 Rectangle((0, 0), 0, 1,
                           color=color,
-                          **self.props[name],
-                          transform=btf(ax.transData,
-                                        ax.transAxes))
+                          **CONFIG.hover[name],
+                          transform=btf(ax.transData, ax.transAxes))
             axes[name].add_patch(rect)
 
         # make map window transparent
@@ -423,7 +399,6 @@ class TimeFrequencyMap(TimeFrequencyBase, CallbackManager):
     Time Frequency Representation (aka Power Spectral density map)
     Interactive plot elements live in this class
     """
-    color_cycle = 'c', 'b', 'm', 'g', 'y', 'orange'
 
     def __init__(self, spectrogram, **kws):
         """ """
@@ -431,7 +406,7 @@ class TimeFrequencyMap(TimeFrequencyBase, CallbackManager):
         self.smoothing = kws.pop('smoothing', 0)
 
         self.hovering = False
-        self.icolour = iter(self.color_cycle)
+        self.color_cycle = iter(CONFIG.sde.color_cycle)
         # containers for highlighted segments
         self.hover = None  # placeholder
         self.windows = []
@@ -447,9 +422,9 @@ class TimeFrequencyMap(TimeFrequencyBase, CallbackManager):
 
         # TODO: can you subclass widgets.cursor to emulate  desired behaviour??
 
-    def plot(self, cmap, ts_props=None, pg_props=None):
+    def plot(self, cmap, ts_config=None, sde_config=None):
 
-        art = TimeFrequencyBase.plot(self, cmap, ts_props, pg_props)
+        art = TimeFrequencyBase.plot(self, cmap, ts_config, sde_config)
 
         # Initiate elements for interactive display
         self.hover = art.hover = HoverSegment(self.axes)
@@ -477,7 +452,7 @@ class TimeFrequencyMap(TimeFrequencyBase, CallbackManager):
 
     def highlight_section(self):
         # persistent highlight this window
-        new = HoverSegment(self.axes,  next(self.icolour))
+        new = HoverSegment(self.axes,  next(self.color_cycle))
         new.update(self.hover.ts.xy[0], self.hover.ts.get_width(),
                    self.hover.spectrum.get_xydata().T)
         self.windows.append(new)
@@ -499,7 +474,7 @@ class TimeFrequencyMap(TimeFrequencyBase, CallbackManager):
         # def _on_draw(self, event):
         # print( 'drawing:', event )
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # ------------------------------------------------------------------------ #
     def ignore_hover(self, event):
         if event.inaxes != self.axes.map:
             return True
@@ -566,7 +541,7 @@ class TimeFrequencyMap(TimeFrequencyBase, CallbackManager):
         self.hover.set_visible(False)
 
         # reset colour cycle
-        self.icolour = iter(self.color_cycle)
+        self.color_cycle = iter(CONFIG.sde.color_cycle)
 
         for art in (self.hover, *self.windows):
             art.remove()
@@ -609,12 +584,12 @@ TimeFrequencyRepresentation = TimeFrequencyMap
 # class SpectralCoherenceMap(TimeFrequencyBase):
 
 #     def __init__(self, t, signalA, signalB, **kws):
-#         show_ts = kws.pop('show_ts', False)  # or ('ts_props' in kws)
-#         ts_props = TimeFrequencyBase.ts_props.copy()
-#         ts_props.update(kws.pop('ts_props', {}))
-#         show_spec = kws.pop('show_spec', True)  # or ('pg_props' in kws)
-#         pg_props = TimeFrequencyBase.pg_props.copy()
-#         pg_props.update(kws.pop('pg_props', {}))
+#         show_ts = kws.pop('show_ts', False)  # or ('ts_config' in kws)
+#         ts_config = TimeFrequencyBase.ts_config.copy()
+#         ts_config.update(kws.pop('ts_config', {}))
+#         show_spec = kws.pop('show_spec', True)  # or ('sde_config' in kws)
+#         sde_config = TimeFrequencyBase.sde_config.copy()
+#         sde_config.update(kws.pop('sde_config', {}))
 
 #         cmap = kws.pop('cmap', 'viridis')
 
@@ -638,7 +613,7 @@ TimeFrequencyRepresentation = TimeFrequencyMap
 #         self.nwindow = resolve_nwindow(self.opts.nwindow, self.opts.split, t,
 #                                        self.dt)
 #         self.noverlap = resolve_overlap(self.nwindow, self.opts.noverlap)
-#         self.fRayleigh = 1. / (self.nwindow * dt)
+#         self.f_rayleigh = 1. / (self.nwindow * dt)
 
 #         # fold
 #         self.t_seg, self.segAraw = self.get_segments(t, signalA, dt,
@@ -665,8 +640,8 @@ TimeFrequencyRepresentation = TimeFrequencyMap
 #         # plot stuff
 #         fig, axes = self.setup_figure(show_ts, show_spec)
 #         self.axes.map, self.axes.ts, self.axes.spec, self.axes.cbar = axes
-#         self.plot(axes, t, signalA, cmap, ts_props,
-#                   pg_props)  # FIXME: signalB
+#         self.plot(axes, t, signalA, cmap, ts_config,
+#                   sde_config)  # FIXME: signalB
 
 #     def main(self, segA, segB):
 #         # since we are dealing with real signals
