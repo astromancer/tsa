@@ -1,16 +1,24 @@
 
+# std
+import tempfile as tmp
+from pathlib import Path
+
 # third-party
 import pytest
 import numpy as np
 
 # local
+from tsa import io
 from tsa.ts import TimeSeries
 
 
 # pylint: disable=missing-function-docstring
-
+# ---------------------------------------------------------------------------- #
+TEST_FOLDER = Path(__file__).parent
+DATA_FOLDER = TEST_FOLDER / 'data'
 
 # ---------------------------------------------------------------------------- #
+
 
 def sinudoidal(size, interval=(0, 2 * np.pi), period=1, amplitude=1, phase=0,
                noise=1, mask=0.8):
@@ -30,14 +38,17 @@ def sinudoidal(size, interval=(0, 2 * np.pi), period=1, amplitude=1, phase=0,
 # ---------------------------------------------------------------------------- #
 
 # data
-@pytest.fixture(params=[
-    # univariate
-    dict(size=50, period=3, amplitude=2),
-    # multivariate
-    dict(size=(100, 3), period=[1, 2, 3])
-])
+@pytest.fixture(scope='session',
+                params=[
+                    # univariate
+                    dict(size=50, period=3, amplitude=2),
+                    # multivariate
+                    dict(size=(100, 3), period=[1, 2, 3])
+                ])
 def case_data(request):
     return sinudoidal(**request.param)
+
+# ---------------------------------------------------------------------------- #
 
 
 def test_init(case_data):
@@ -70,11 +81,30 @@ def test_raises(case_data):
         TimeSeries(t, ym, -np.ones_like(ym))
 
 
+@pytest.mark.parametrize('ext', io.SUPPORTED)
+def test_io(case_data, ext):
+    
+    # init
+    ts = TimeSeries(*case_data)
+    
+    # write
+    fp, name = tmp.mkstemp(f'.{ext}')
+    ts.save(name)
+
+    # test read
+    clone = TimeSeries.read(name)
+
+    # compare
+    tol = 10 ** -(io.txt.CONFIG.precision if ext == 'txt' else 8)
+    assert np.ma.allclose(clone.value, ts.value, atol=tol)
+    assert np.ma.allclose(clone.sigma, ts.sigma, atol=tol)
+
+
 @pytest.mark.mpl_image_compare(baseline_dir='images/ts/',
                                style='default')
 def test_plot(case_data):
     ts = TimeSeries(*case_data)
-    tsp = ts.plot()
+    tsp = ts.plot()  # mask = np.atleast_2d(mask)
     return tsp.figure
 
 # ---------------------------------------------------------------------------- #

@@ -8,11 +8,13 @@ import numpy as np
 from loguru import logger
 
 # local
-from recipes import io
 from recipes.iter import cofilter
+from recipes.oo.slots import sanitize
+from recipes.functionals import not_none
 
 # relative
 from . import txt
+from .utils import split_mask, stack_arrays, unstack_arrays
 
 
 # ---------------------------------------------------------------------------- #
@@ -54,31 +56,40 @@ class Reader:
 
     txt = staticmethod(txt.read)
 
-    def __call__(self, filename, hdu=None, **kws):
+    def __call__(self, filename, **kws):
         logger.info('Loading data from {}.', filename)
         filename = Path(filename)
         reader = getattr(self, SupportedFileType(filename).value)
-        return reader(filename, hdu, **kws)
+        return reader(filename, **kws)
 
-    def npy(self, filename, hdu, order=...):
+    def npy(self, filename, order=..., names=None):
+
+        data = np.load(filename)
+        index, value, sigma = unstack_arrays(data, True)
+
+        return index, value[:, order], sigma[:, order]
+
+    # def memmap(self, filename, hdu, order=..., names=None):
 
         # CONFIG.pre_subtract
         # since the (gain) calibrated frames are being used below,
         # CCDNoiseModel(hdu.readout.noise)
 
-        flux = io.load_memmap(filename)['flux']
-        return hdu.t.bjd, flux['value'][:, order], flux['sigma'][:, order]
+        # FIXME:
+        # flux = io.load_memmap(filename)['flux']
+        # return hdu.t.bjd, flux['value'][:, order], flux['sigma'][:, order]
 
-    def npz(self, filename, hdu=None, fields=('index', 'value', 'sigma')):
+    def npz(self, filename, fields=('index', 'values', 'sigma')):
 
         data = np.load(filename)
         index, value, *sigma = tuple(data.get(field, None) for field in fields)
 
-        if (flag := data.get('flag', None)) is not None:
-            assert len(flag) == len(value)
-            flag = flag.astype(bool)
-            value = np.ma.MaskedArray(value, flag)
+        if (mask := data.get('mask', None)) is not None:
+            assert len(mask) == len(value)
+            mask = mask.astype(bool)
+            value = np.ma.MaskedArray(value, mask)
 
+        # return dict(zip(fields, filter(None, (index, value, sigma))))
         return index, value, *sigma
 
 
@@ -92,68 +103,55 @@ class Writer:
 
     txt = staticmethod(txt.write)
 
-    def __call__(self, filename, index, value, sigma, **kws):
+    def __call__(self, filename, index, values, sigma, **kws):
+        """
+        Write measurement sequence data to file. Various formats are supported.
+
+        Parameters
+        ----------
+        filename : Path-like
+            Path to the destination file.
+        index : array
+            Independent variable.
+        values : array
+            Data values.
+        sigma : array
+            Standard deviation uncertainty of data value.
+
+        """
         filename = Path(filename)
         method = getattr(self, SupportedFileType(filename).value)
-        return method(filename, index, value, sigma, **kws)
 
-    def npy(self, filename, index, value, sigma, mask=None, **kws):
+        # extract mask
+        values, sigma, mask = split_mask(values, sigma)
 
-        if np.ma.isMA(value) or np.ma.isMA(sigma):
-            mask = np.ma.getmaskarray(value) | np.ma.getmaskarray(sigma)
-
-        logger.info('Saving light curve data ({} rows, {} sources, {} masked '
-                    'points{}) to file: {}',
-                    len(index), len(value), (0 if mask is None else mask.sum()),
+        # log info
+        nrows, nseries = values.shape
+        logger.info('Saving sequence data ({} rows, {} series, containing {} '
+                    'masked points{}) to file: {}',
+                    nrows, nseries, (0 if mask is None else mask.sum()),
+                    #  ', including meta data' if meta else ''
                     '', filename)
 
+        return method(filename, index, values, sigma, mask=mask, **kws)
+
+    def npy(self, filename, index, values, sigma, mask=None, **kws):
+
         # stack data
-        data = stack_arrays(index, value, sigma, mask)
+        data = stack_arrays(index, values, sigma, mask)
 
-        return np.save(filename, data)
+        # save
+        np.save(filename, data)
 
-    def npz(self, filename, index, value, **kws):
+    def npz(self, filename, index, values, sigma=None, **kws):
 
-        # filter `None` values
-        kws = dict(zip(*cofilter(None, kws.values(), kws.keys())[::-1]))
-        np.savez_compressed(filename, index=index, value=value, **kws)
+        # Get namespace, filtering `None` values
+        kws.update(sanitize(locals(),  'filename'))
+        kws = dict(zip(*cofilter(not_none, kws.values(), kws.keys())[::-1]))
+
+        # save
+        np.savez_compressed(filename, **kws)
 
 
 # Singleton
 write = Writer()
-
-
-# ---------------------------------------------------------------------------- #
-# Utility function
-
-def stack_arrays(index, flx, sigma, flag=None):
-    """
-    Stack light curve data into table for writing to file. Measurements for
-    each star (Flux, σFlux, ...) columns are horizontally stacked.
-
-    Parameters
-    ----------
-    index
-    flx
-    sigma
-    flag
-
-    Returns
-    -------
-
-    """
-    nstars = len(flx)
-    assert len(sigma) == nstars
-
-    components = [flx, sigma]
-    if flag is not None:
-        assert len(flag) == nstars
-        flag = flag.astype(int)
-        components.append(flag)
-
-    tbl = [index]
-    for columns in zip(*components):
-        tbl.extend(columns)
-
-    # convert to array
-    return np.array(tbl).T

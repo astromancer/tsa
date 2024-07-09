@@ -1,5 +1,6 @@
 """
-Write light curves to plain text in utf-8, emphesis on human readable forms.
+Write time series / frequency spectra to plain text in utf-8, emphasis on human
+readable forms.
 """
 
 # std
@@ -18,6 +19,9 @@ from recipes.io import read_lines
 from recipes.string import hstack
 from recipes.config import ConfigNode
 from recipes.pprint.mapping import pformat
+
+# relative
+from .utils import stack_arrays, unstack_arrays, split_mask
 
 
 # ---------------------------------------------------------------------------- #
@@ -44,6 +48,24 @@ MULTILINE_CURLY_BRACKET = textwrap.dedent(
 
 
 def parse_format_spec(fmt):
+    """
+    Parse a format specifier into width, precision, and data type.
+
+    Parameters
+    ----------
+    fmt : str
+        Format specifier.
+
+    Returns
+    -------
+    tuple
+        A tuple containing width, precision, and data type.
+
+    Raises
+    ------
+    ValueError
+        If the format specifier is invalid.
+    """
     if mo := REGEX_FORMAT_SPEC.match(fmt):
         return mo.groups()  # width, precision, dtype =
     else:
@@ -51,16 +73,63 @@ def parse_format_spec(fmt):
 
 
 def format_list(data, fmt='%g', width=8, sep=','):
+    """
+    Format a list of data into a string.
+
+    Parameters
+    ----------
+    data : list
+        List of data to format.
+    fmt : str, optional
+        Format string, by default '%g'.
+    width : int, optional
+        Width of each formatted element, by default 8.
+    sep : str, optional
+        Separator between elements, by default ','.
+
+    Returns
+    -------
+    str
+        Formatted string.
+    """
     lfmt = f'%-{width}s' * len(data)
     s = lfmt % tuple(np.char.mod(fmt + sep, data))
     return s[::-1].replace(',', ' ', 1)[::-1].join('[]')
 
 
 def underline_ascii(text):
+    """
+    Underline a given text with ASCII dashes "-".
+
+    Parameters
+    ----------
+    text : str
+        Text to underline.
+
+    Returns
+    -------
+    str
+        Underlined text.
+    """
     return '\n'.join([text, '-' * len(text)])
 
 
 def header_info_block(name, info):
+    """
+    Create a header information block.
+
+    Parameters
+    ----------
+    name : str
+        Name of the block.
+    info : dict
+        Information to include in the block.
+
+    Returns
+    -------
+    str
+        Header information block.
+    """
     return '\n'.join(_header_info_block(name, info))
 
 
@@ -73,10 +142,38 @@ def _header_info_block(name, info):
 
 
 def get_name(o):
+    """
+    Get the name of an object.
+
+    Parameters
+    ----------
+    o : object
+        Object to retriev the name of.
+
+    Returns
+    -------
+    str
+        Name of the object.
+    """
     return o.__name__ if callable(o) else str(o)
 
 
 def check_column_widths(names, formats):
+    """
+    Check and adjust column widths based on names and format specifiers.
+
+    Parameters
+    ----------
+    names : list
+        List of column names.
+    formats : list
+        List of format specifiers.
+
+    Returns
+    -------
+    tuple
+        Three lists containing widths, precisions, and data types.
+    """
     widths, precisions, dtypes = [], [], []
     for name, fmt in zip(names, formats):
         width, precision, dtype = parse_format_spec(fmt)
@@ -102,8 +199,20 @@ def check_column_widths(names, formats):
 
 
 def write_header_aligned(a, out):
+    """
+    Write the header aligned with the data.
+
+    Parameters
+    ----------
+    a : array
+        Array containing the data.
+    out : str, Path
+        Output file path.
+    """
+
     # fn = '/home/hannes/work/pyshoc/pyshoc/data/SHOC1.txt'
     # a = np.genfromtxt(fn, dtype=None, names=True, encoding=None)
+
     a = a.astype([(_, t.replace('S', 'U')) for _, t in a.dtype.descr])
 
     widths = np.array(list(map(len, a.dtype.names)))
@@ -118,7 +227,19 @@ def write_header_aligned(a, out):
 
 def make_column_format(names, formats):
     """
-    Adjust the column format specifiers to accommodate width of the column names
+    Adjust the column format specifiers to accommodate width of the column names.
+
+    Parameters
+    ----------
+    names : list
+        List of column names.
+    formats : list
+        List of format specifiers.
+
+    Returns
+    -------
+    tuple
+        Column widths, format string for the header, and format string for the data.
     """
     widths, precisions, dtypes = check_column_widths(names, formats)
     col_fmt_head = ''.join(map('%%-%is'.__mod__, [widths[0] - 2, *widths[1:]]))
@@ -135,14 +256,36 @@ def _make_name_format(col_widths, has_oflag):
 
 def get_column_info(nseries, col_info, has_oflag, precision=CONFIG.precision,
                     series_type='series'):
+    """
+    Get column information.
+
+    Parameters
+    ----------
+    nseries : int
+        Number of series.
+    col_info : dict
+        Column information.
+    has_oflag : bool
+        Flag indicating if outlier flag is present.
+    precision : int, optional
+        Precision of the data, by default CONFIG.precision.
+    series_type : str, optional
+        Type of series, by default 'series'.
+
+    Returns
+    -------
+    tuple
+        Names, units, formats, and info for the columns.
+    """
 
     _names, _units, descript = zip(*col_info.values())
     info = dict(zip(_names, descript))
 
-    names = [col_info['time'][0]]
-    units = [col_info['time'][1]]
+    names = [col_info['index'][0]]
+    units = [col_info['index'][1]]
     formats = ['%18.9f']
-    col_names_per_series, col_units_per_series = \
+
+    col_names_per_series, col_units_per_series, _ = \
         map(list, zip(col_info['value'], col_info['sigma']))
     col_fmt_per_series = [f'%12.{precision}f'] * 2
 
@@ -160,7 +303,7 @@ def get_column_info(nseries, col_info, has_oflag, precision=CONFIG.precision,
     info_text = hstack(('\n'.join(info.values()),
                         MULTILINE_CURLY_BRACKET % (nseries, series_type)), 3)
 
-    info.update(zip(info, info_text.splitlines()))
+    info.update(zip(info, map(str.rstrip, info_text.splitlines())))
 
     # build column headers
     for _ in range(nseries):
@@ -174,8 +317,35 @@ def get_column_info(nseries, col_info, has_oflag, precision=CONFIG.precision,
     return names, units, formats, info
 
 
-def make_header(title, obj_name, shape_info, col_info, has_oflag, meta=None,
+def make_header(title, target_name, shape_info, col_info, has_oflag, meta=None,
                 precision=CONFIG.precision, series_type='series'):
+    """
+    Make a header for the file.
+
+    Parameters
+    ----------
+    title : str
+        Title for the header.
+    target_name : str
+        Name of the target object.
+    shape_info : dict
+        Information about the shape of the data.
+    col_info : dict
+        Information about the columns.
+    has_oflag : bool
+        Flag indicating if outlier flag is present.
+    meta : dict, optional
+        Meta data for the header, by default None.
+    precision : int, optional
+        Precision of the data, by default CONFIG.precision.
+    series_type : str, optional
+        Type of series, by default 'series'.
+
+    Returns
+    -------
+    tuple
+        Header string and column format string for the data.
+    """
 
     if meta is None:
         meta = {}
@@ -185,6 +355,7 @@ def make_header(title, obj_name, shape_info, col_info, has_oflag, meta=None,
     nseries = shape_info['nseries']
     names, units, formats, col_info = get_column_info(
         nseries, col_info, has_oflag, precision, series_type)
+
     # adjust the formatters
     col_widths, col_fmt_head, col_fmt_data = make_column_format(names, formats)
 
@@ -197,26 +368,13 @@ def make_header(title, obj_name, shape_info, col_info, has_oflag, meta=None,
     }
 
     # column headers block
-    lines = _make_header(info, obj_name, nseries, has_oflag,
+    lines = _make_header(info, target_name, nseries, has_oflag,
                          (names, units, col_widths, col_fmt_head))
     return '\n'.join(lines).replace('\n', '\n# ')[:-2], col_fmt_data
 
 
-def _make_header(header_info, obj_name, nseries, has_oflag, col_spec):
-    """
+def _make_header(header_info, target_name, nseries, has_oflag, col_spec):
 
-    Parameters
-    ----------
-    obj_name
-    shape_info
-    has_oflag
-    meta:
-        meta data that will be printed in the header
-
-    Returns
-    -------
-
-    """
     *col_names_units, col_widths, col_fmt_head = col_spec
 
     # header blocks for additional meta data
@@ -229,8 +387,8 @@ def _make_header(header_info, obj_name, nseries, has_oflag, col_spec):
     yield (hline := '-' * (sum(col_widths) - 2))
 
     # object names
-    obj_names = ('', obj_name, *(f'C{i}' for i in range(nseries - 1)))
-    yield _make_name_format(col_widths, has_oflag) % obj_names
+    target_names = ('', target_name, *(f'C{i}' for i in range(nseries - 1)))
+    yield _make_name_format(col_widths, has_oflag) % target_names
 
     # column titles
     for o in col_names_units:
@@ -240,82 +398,56 @@ def _make_header(header_info, obj_name, nseries, has_oflag, col_spec):
     yield ''  # advance to new line
 
 
-def stack_arrays(t, flx, std, mask=None):
+def write(filename, time, values, sigma, mask=None,
+          title=CONFIG.title, col_info=CONFIG.columns, meta=None,
+          target='<unknown>', precision=CONFIG.precision, series_type='series'):
     """
-    Stack light curve data into table for writing to file. Measurements for
-    each series (Flux, σFlux, ...) columns are horizontally stacked.
-
-    Parameters
-    ----------
-    t
-    flx
-    std
-    mask
-
-    Returns
-    -------
-
-    """
-    nseries = len(flx)
-    assert len(std) == nseries
-
-    components = [flx, std]
-    if mask is not None:
-        assert len(mask) == nseries
-        mask = mask.astype(int)
-        components.append(mask)
-
-    tbl = [t]
-    for columns in zip(*components):
-        tbl.extend(columns)
-
-    # convert to array
-    return np.array(tbl).T
-
-
-def write(filename, t, counts, std, mask=None,
-          title=CONFIG.title, col_info=CONFIG.columns, meta=None, target='<unknown>',
-          precision=CONFIG.precision, series_type='series'):
-    """
-    Write to text file
+    Write to text file.
 
     Parameters
     ----------
     filename : str, Path
-        Destination
-    t : array
+        Path to save data to.
+    time : array
         Time stamps.
-    counts : array 
-        Source counts.
-    std : array
-        Uncertainty 
+    values : array
+        Data values to write.
+    sigma : array
+        Standard deviation uncertainty of data values.
     mask : array, optional
         Masked values boolean array, by default None.
     title : str, optional
         Title for header, by default CONFIG.title
+    col_info : 
+        Column information.
     meta : dict, optional
         Meta data for header, by default None
     target : str, optional
         Name of the target, by default '<unknown>'
+    precision : int
+        Numberical precision to use when formatting the data.
+    series_type : str
+        The type of series that the data represents. This information is written
+        to the document header.
 
     """
 
     if meta is None:
         meta = {}
 
-    if np.ma.isMA(counts) or np.ma.isMA(std):
-        mask = np.ma.getmaskarray(counts) | np.ma.getmaskarray(std)
+    # # get the masked values as separate array for saving as column values
+    # values, sigma, mask = split_mask(values, sigma, mask)
+    _, nseries = values.shape
 
-    logger.info('Saving time series data ({} rows, {} sources, {} masked '
-                'points{}) to file: {}',
-                len(t), len(counts), (0 if mask is None else mask.sum()),
-                ', including meta data' if meta else '', filename)
+    # logger.info('Saving sequence data ({} rows, {} series, containing {} '
+    #             'masked points{}) to file: {}',
+    #             len(time), nrows, nseries, (0 if mask is None else mask.sum()),
+    #             ', including meta data' if meta else '', filename)
 
     # stack data
-    data = stack_arrays(t, counts, std, mask)
+    data = stack_arrays(time, values, sigma, mask)
 
     nrows, ncols = data.shape
-    nseries = len(counts)
     shape_info = dict(nrows=nrows, ncols=ncols, nseries=nseries)
     has_oflag = mask is not None
     header, col_fmt_data = make_header(title.format(target), target,
@@ -333,22 +465,27 @@ write_text = write
 
 
 def read(filename, *_, **__):
+    """
+    Read data from a file
+
+    Parameters
+    ----------
+    filename : Path-like
+        Path to the file.
+
+    Returns
+    -------
+    tuple
+        Time stamps, data values, standard deviation uncertainty of data.
+    """
 
     header = read_lines(filename, 25)
     data = np.loadtxt(filename)
 
     oflag = op.index(header, f'# {CONFIG.columns.outlier[0]}',
                      test=str.startswith, default=None)
-    oflag = int(oflag is not None)
-    step = 2 + oflag
 
-    t = data[:, 0]
-    flux, sigma, *oflag = (data[:, i::step] for i in range(1, 3 + oflag))
-
-    if oflag:
-        flux = np.ma.MaskedArray(flux, oflag[0])
-
-    return t, flux, sigma
+    return unstack_arrays(data, oflag)
 
 
 # alias

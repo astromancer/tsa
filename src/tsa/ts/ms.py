@@ -14,6 +14,7 @@ import numpy as np
 from loguru import logger
 
 # local
+from recipes.oo import slots
 from recipes.flow import Emit
 from recipes.logging import LoggingMixin
 from recipes.oo.property import Alias, CachedProperty
@@ -191,7 +192,12 @@ class MeasurementSequence(LoggingMixin):
     load = read
 
     def write(self, filename, **kws):
-        return io.write(filename, *self, **kws)
+        
+        data = self
+        if self.index is None:
+            data = (np.arange(self.n), self.value, self.sigma)
+
+        return io.write(filename, *data, **kws)
 
     # aliases
     load = Alias('read')
@@ -216,34 +222,45 @@ class MeasurementSequence(LoggingMixin):
 
     # Data
     # ------------------------------------------------------------------------ #
+    _value_ndim_max = 2
+
     @property
     def value(self):
-        return self._value  # .squeeze()
+        return self._value
 
     @value.setter
     def value(self, value):
-        # make sure we have masked array
-        value = np.ma.array(value, ndmin=2)
-        if (value.ndim < 1) | (value.ndim > 2):
-            raise ValueError(f'Time Series data should be 1D or 2D '
-                             f'(multivariate case) not {value.ndim}.')
-
-        # make sure variate index in last position
-        if 1 in value.shape and len(value) == 1:
-            value = value.T
-
-        self._value = value
+        # set
+        self._value = self._check_array(value)
 
         # delete cached stats
         del self.mean
         del self.var
 
-    def _check_against_value(self, vector, name):
-        n, m = len(self), len(vector)
+    def _check_array(self, array):
+        # make sure we have masked array
+        array = np.ma.array(array, ndmin=2)
+
+        if array.ndim > self._value_ndim_max:
+            raise ValueError(
+                f'{type(self).__name__} data should be at most '
+                f'{self._value_ndim_max}-dimensional not {array.ndim}D.'
+            )
+
+        # make sure variate index in last position
+        if 1 in array.shape and len(array) == 1:
+            array = np.moveaxis(array, 0, -1)
+
+        return array
+
+    def _check_against_value(self, array, name):
+
+        n = len(self)
+        m = len(array)
         if m != n:
             raise ValueError(
                 f'Unequal number of points between data ({n=}) and {name} '
-                f'`{name[0]}` ({m=}) vectors.'
+                f'({m=}) arrays.'
             )
 
     # Uncertainty
@@ -258,13 +275,18 @@ class MeasurementSequence(LoggingMixin):
             self._sigma = None
             return
 
-        sigma = np.ma.array(sigma)
-        self._check_against_value(sigma, 'uncertainty')
+        # check dimensionality
+        sigma = self._check_array(sigma)
+
+        # check valid values
         if np.any(sigma < 0):
             raise ValueError('Cannot have negative uncertainties.')
+
+        # check shape same as values
+        self._check_against_value(sigma, 'uncertainty')
+
         self._sigma = sigma
 
-    # ------------------------------------------------------------------------ #
     # ------------------------------------------------------------------------ #
     @property
     def n(self):
