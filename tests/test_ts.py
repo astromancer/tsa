@@ -8,19 +8,31 @@ import pytest
 import numpy as np
 
 # local
+from recipes.config import ConfigNode
 from tsa import io
 from tsa.ts import TimeSeries
 
 
 # pylint: disable=missing-function-docstring
+
+
 # ---------------------------------------------------------------------------- #
+#
 TEST_FOLDER = Path(__file__).parent
 DATA_FOLDER = TEST_FOLDER / 'data'
 
+DATA_PARAMS = ConfigNode({
+    'univariate':   dict(size=50,
+                         period=3,
+                         amplitude=2),
+    'multivariate': dict(size=(100, 3),
+                         period=[1, 2, 3])
+})
+
 # ---------------------------------------------------------------------------- #
 
 
-def sinudoidal(size, interval=(0, 2 * np.pi), period=1, amplitude=1, phase=0,
+def sinusoidal(size, interval=(0, 2 * np.pi), period=1, amplitude=1, phase=0,
                noise=1, mask=0.8):
 
     # generate some data
@@ -36,57 +48,69 @@ def sinudoidal(size, interval=(0, 2 * np.pi), period=1, amplitude=1, phase=0,
 
 
 # ---------------------------------------------------------------------------- #
+# data fixtures
 
-# data
-@pytest.fixture(scope='session',
-                params=[
-                    # univariate
-                    dict(size=50, period=3, amplitude=2),
-                    # multivariate
-                    dict(size=(100, 3), period=[1, 2, 3])
-                ])
-def case_data(request):
-    return sinudoidal(**request.param)
+def get_combination(case_data, i):
 
-# ---------------------------------------------------------------------------- #
-
-
-def test_init(case_data):
-    #
     t, ym, e = case_data
     y = ym.data
 
-    # basic, implicit time index
-    TimeSeries(y)
+    if i == 0:
+        # basic, implicit time index
+        return y,
 
-    # explicit time index
-    TimeSeries(t, y)
+    if i == 1:
+        # explicit time index
+        return t, y
 
-    # with uncertainties
-    TimeSeries(t, y, e)
+    if i == 2:
+        # with uncertainties
+        return t, y, e
 
-    # masked data
-    TimeSeries(t, ym, e)
+    if i == 3:
+        # masked data
+        return t, ym, e
+
+    raise ValueError
 
 
-def test_raises(case_data):
-    t, ym, e = case_data
+@pytest.fixture(ids=DATA_PARAMS.keys(), params=DATA_PARAMS.values())
+def sample_data(request):
+    return sinusoidal(**request.param)
 
+
+@pytest.fixture(params=range(4), ids=['basic', 'timed', 'uncertain', 'masked'])
+def case_data(sample_data, request):
+    return get_combination(sample_data, request.param)
+
+
+# ---------------------------------------------------------------------------- #
+# Tests
+
+def test_init(case_data):
+    ts = TimeSeries(*case_data)
+    if ts.m > 1:
+        assert isinstance(ts, ts.multivariate)
+
+
+def test_unequal_size():
     # unequal array sizes
     with pytest.raises(ValueError):
-        TimeSeries(t, ym, [1])
+        TimeSeries([0, 1], [1, 1], [1])
 
+
+def test_negative_uncertainty():
     # negative uncertainties not allowed
     with pytest.raises(ValueError):
-        TimeSeries(t, ym, -np.ones_like(ym))
+        TimeSeries([0, 1], [1, 1], [1, -1])
 
 
 @pytest.mark.parametrize('ext', io.SUPPORTED)
 def test_io(case_data, ext):
-    
+
     # init
     ts = TimeSeries(*case_data)
-    
+
     # write
     fp, name = tmp.mkstemp(f'.{ext}')
     ts.save(name)
