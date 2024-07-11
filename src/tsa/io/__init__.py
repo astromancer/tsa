@@ -22,7 +22,6 @@ from .utils import split_mask, stack_arrays, unstack_arrays
 class SupportedFileType(Enum):
 
     TXT = 'txt'
-    NPY = 'npy'
     NPZ = 'npz'
     # DAT = 'dat'
     # FITS = 'fits'
@@ -61,13 +60,6 @@ class Reader:
         filename = Path(filename)
         reader = getattr(self, SupportedFileType(filename).value)
         return reader(filename, **kws)
-
-    def npy(self, filename, order=..., names=None):
-
-        data = np.load(filename)
-        index, value, sigma = unstack_arrays(data, True)
-
-        return index, value[:, order], sigma[:, order]
 
     # def memmap(self, filename, hdu, order=..., names=None):
 
@@ -135,18 +127,11 @@ class Writer:
 
         return method(filename, index, values, sigma, mask=mask, **kws)
 
-    def npy(self, filename, index, values, sigma, mask=None, **kws):
-
-        # stack data
-        data = stack_arrays(index, values, sigma, mask)
-
-        # save
-        np.save(filename, data)
 
     def npz(self, filename, index, values, sigma=None, **kws):
 
         # Get namespace, filtering `None` values
-        kws.update(sanitize(locals(),  'filename'))
+        kws.update(sanitize(locals(), 'filename'))
         kws = dict(zip(*cofilter(not_none, kws.values(), kws.keys())[::-1]))
 
         # save
