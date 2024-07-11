@@ -1,20 +1,29 @@
 # ---------------------------------------------------------------------------- #
 io.txt:
-    title:  Time Series for {}
+    title:  'Time Series: {}'
 
     # columns [name, unit, description]
     columns:
         index: 
-            [Time, '', Time stamp]
-            # [sidt, h  Sidereal time in seconds since midnight]
-        value: 
-            [x, '', Data value]
+            title:          Time
+            description:    Time stamp
+            fmt:            18.9f
+            unit:           ''
+        values: 
+            title:          x
+            description:    Data value
+            fmt:            12.6f
+            unit:           ''
         sigma:   
-            [σ, '', Standard deviation uncertainty of data value]
-        outlier: 
-            [oflag, '', Outlier flag]
-
-    precision:  5   # significant figures
+            title:          σ
+            description:    Standard deviation uncertainty of data value
+            fmt:            12.6f
+            unit:           ''
+        mask: 
+            title:          oflag
+            description:    Outlier flag
+            fmt:            6i
+            unit:           ''
 
 
 # ---------------------------------------------------------------------------- #

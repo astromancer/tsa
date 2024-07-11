@@ -112,16 +112,35 @@ def test_io(case_data, ext):
     ts = TimeSeries(*case_data)
 
     # write
-    fp, name = tmp.mkstemp(f'.{ext}')
+    fp, name = tmp.mkstemp(f'.{ext}', dir=DATA_FOLDER)
     ts.save(name)
 
     # test read
     clone = TimeSeries.read(name)
 
     # compare
-    tol = 10 ** -(io.txt.CONFIG.precision if ext == 'txt' else 8)
-    assert np.ma.allclose(clone.value, ts.value, atol=tol)
-    assert np.ma.allclose(clone.sigma, ts.sigma, atol=tol)
+    assert np.ma.allclose(ts.value, clone.value, atol=get_tol('values', ext))
+    
+    if ts.index is None:
+        assert clone.index is None
+    else:
+        assert np.ma.allclose(ts.index, clone.index, atol=get_tol('index', ext))
+
+    if ts.sigma is None:
+        assert clone.sigma is None
+    else:
+        assert np.ma.allclose(ts.sigma, clone.sigma, atol=get_tol('sigma', ext))
+
+
+def get_tol(field, ext):
+    return 10 ** -get_precision(field, ext)
+
+
+def get_precision(field, ext):
+    if ext == 'txt':
+        _, precision, _ = io.txt.parse_format_spec(io.txt.CONFIG.columns[field].fmt)
+        return int(precision)
+    return 8
 
 
 @pytest.mark.mpl_image_compare(baseline_dir='images/ts/',

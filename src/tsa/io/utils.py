@@ -26,7 +26,10 @@ def stack_arrays(time, values, sigma, mask=None):
     # nseries = values.shape
     # assert len(sigma) == nseries
 
-    components = [values.T, sigma.T]
+    components = [values.T]
+    if sigma is not None:
+        components.append(sigma.T)
+
     if mask is not None:
         # mask = np.atleast_2d(mask)
         assert mask.shape == values.shape
@@ -41,28 +44,38 @@ def stack_arrays(time, values, sigma, mask=None):
     return np.array(tbl).T
 
 
-def unstack_arrays(data, oflag):
+def unstack_arrays(data, has_index, has_sigma, has_mask):
 
-    oflag = int(oflag is not None)
-    step = 2 + oflag
-    values, sigma, *oflag = (data[:, i::step] for i in range(1, 3 + oflag))
+    index = data[:, 0] if has_index else None
 
-    if oflag:
-        values = np.ma.MaskedArray(values, oflag[0])
+    step = sum((has_sigma, has_mask, 1))
+    values = data[:, has_index::step]
+    if has_mask:
+        mask = data[:, sum((has_index, has_sigma, 1))::step]
+        values = np.ma.MaskedArray(values, mask)
 
-    return data[:, 0], values, sigma
+    sigma = data[:, has_index + 1::step] if has_sigma else None
 
+    return index, values, sigma
+
+
+# def apply_mask(values, mask):
+    
+    
 
 def split_mask(values, sigma):
 
     values = np.asanyarray(values).squeeze()
-    sigma = np.asanyarray(sigma).squeeze()
+    if have_sigma := sigma is not None:
+        sigma = np.asanyarray(sigma).squeeze()
 
     if values.ndim == 1:
         values = values[:, None]
-        sigma = sigma[:, None]
+        if have_sigma:
+            sigma = sigma[:, None]
 
-    if np.ma.isMA(values) or np.ma.isMA(sigma):
+    mask = None
+    if np.ma.is_masked(values) or np.ma.is_masked(sigma):
         mask = np.ma.getmaskarray(values) | np.ma.getmaskarray(sigma)
 
     return values, sigma, mask

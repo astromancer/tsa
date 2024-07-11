@@ -192,7 +192,7 @@ class MeasurementSequence(LoggingMixin):
     load = read
 
     def write(self, filename, **kws):
-        
+
         data = self
         if self.index is None:
             data = (np.arange(self.n), self.value, self.sigma)
