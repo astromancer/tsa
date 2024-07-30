@@ -1,5 +1,5 @@
 """
-Support for multivariate measurement sequence with optional timestamps and
+Support for multivariate measurement sequences with optional time stamps and
 uncertainties. Base for `TimeSeries` and `SpectralEstimate` classes.
 """
 
@@ -186,10 +186,9 @@ class MeasurementSequence(LoggingMixin):
     # IO
     @classmethod
     def read(cls, filename, *_, **__):
-        return cls(*io.read(filename))
-
-    # alias
-    load = read
+        data, meta = io.read(filename)
+        # TODO: metadata
+        return cls(*data)
 
     def write(self, filename, **kws):
 
@@ -216,7 +215,8 @@ class MeasurementSequence(LoggingMixin):
             return
 
         index = np.asanyarray(index).squeeze()
-        self._index = self._check_against_value(index, 'index')
+        self._check_against_value(index, 'index')
+        self._index = index
 
     # Data
     # ------------------------------------------------------------------------ #

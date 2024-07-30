@@ -8,6 +8,7 @@ import numpy as np
 from loguru import logger
 
 # local
+from recipes import op
 from recipes.iter import cofilter
 from recipes.oo.slots import sanitize
 from recipes.functionals import not_none
@@ -22,7 +23,7 @@ from .utils import split_mask, stack_arrays, unstack_arrays
 class SupportedFileType(Enum):
 
     TXT = 'txt'
-    NPZ = 'npz'
+    # NPZ = 'npz'
     # DAT = 'dat'
     # FITS = 'fits'
     # hd5
@@ -80,16 +81,23 @@ class Reader:
             assert len(mask) == len(value)
             mask = mask.astype(bool)
             value = np.ma.MaskedArray(value, mask)
+        
+        # data
+        data = (index, value, *sigma)
+
+        # meta 
+        meta_keys = set(data.keys()) - set(fields)
+        meta = op.ItemMap(*meta_keys)(data)
+        logger.debug('The following meta data was read: {}.', meta)
 
         # return dict(zip(fields, filter(None, (index, value, sigma))))
-        return index, value, *sigma
-
+        return data, meta
 
 # Singleton
 read = Reader()
 
-# --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
 
 class Writer:
 
@@ -103,12 +111,12 @@ class Writer:
         ----------
         filename : Path-like
             Path to the destination file.
-        index : array
-            Independent variable.
+        index : array or None
+            Independent variable. Ignored if None.
         values : array
             Data values.
-        sigma : array
-            Standard deviation uncertainty of data value.
+        sigma : array or None
+            Standard deviation uncertainty of data value. Ignored if None.
 
         """
         filename = Path(filename)
@@ -125,10 +133,9 @@ class Writer:
                     #  ', including meta data' if meta else ''
                     '', filename)
 
-        return method(filename, index, values, sigma, mask=mask, **kws)
+        return method(filename, index, values, sigma, mask, **kws)
 
-
-    def npz(self, filename, index, values, sigma=None, **kws):
+    def npz(self, filename, index, values, sigma=None, mask=None, **kws):
 
         # Get namespace, filtering `None` values
         kws.update(sanitize(locals(), 'filename'))

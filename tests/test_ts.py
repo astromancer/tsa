@@ -18,19 +18,23 @@ from tsa.ts import TimeSeries
 
 # ---------------------------------------------------------------------------- #
 #
+CASE_IDS = ['basic', 'timed', 'uncertain', 'masked']
 TEST_FOLDER = Path(__file__).parent
 DATA_FOLDER = TEST_FOLDER / 'data'
-
 DATA_PARAMS = ConfigNode({
-    'univariate':   dict(size=50,
-                         period=3,
-                         amplitude=2),
-    'multivariate': dict(size=(100, 3),
-                         period=[1, 2, 3])
+    'univariate':   {
+        'size':        50,
+        'period':      3,
+        'amplitude':   2
+    },
+    'multivariate': {
+        'size':        (100, 3),
+        'period':      [1, 2, 3]
+    }
 })
 
-# ---------------------------------------------------------------------------- #
 
+# ---------------------------------------------------------------------------- #
 
 def sinusoidal(size, interval=(0, 2 * np.pi), period=1, amplitude=1, phase=0,
                noise=1, mask=0.8):
@@ -50,24 +54,24 @@ def sinusoidal(size, interval=(0, 2 * np.pi), period=1, amplitude=1, phase=0,
 # ---------------------------------------------------------------------------- #
 # data fixtures
 
-def get_combination(case_data, i):
+def get_combination(case_data, id):
 
     t, ym, e = case_data
     y = ym.data
 
-    if i == 0:
+    if id == 'basic':
         # basic, implicit time index
         return y,
 
-    if i == 1:
+    if id == 'timed':
         # explicit time index
         return t, y
 
-    if i == 2:
+    if id == 'uncertain':
         # with uncertainties
         return t, y, e
 
-    if i == 3:
+    if id == 'masked':
         # masked data
         return t, ym, e
 
@@ -79,7 +83,7 @@ def sample_data(request):
     return sinusoidal(**request.param)
 
 
-@pytest.fixture(params=range(4), ids=['basic', 'timed', 'uncertain', 'masked'])
+@pytest.fixture(params=CASE_IDS, ids=CASE_IDS)
 def case_data(sample_data, request):
     return get_combination(sample_data, request.param)
 
@@ -112,6 +116,8 @@ def test_io(case_data, ext):
     ts = TimeSeries(*case_data)
 
     # write
+    # suf = 'i' * (ts.index is not None) + 'σ' * (ts.sigma is not None) + 'm' * np.ma.is_masked(ts.x)
+    # name = DATA_FOLDER / f'{ts.m}-{ts.n}-{suf}.{ext}'
     fp, name = tmp.mkstemp(f'.{ext}', dir=DATA_FOLDER)
     ts.save(name)
 
@@ -120,9 +126,9 @@ def test_io(case_data, ext):
 
     # compare
     assert np.ma.allclose(ts.value, clone.value, atol=get_tol('values', ext))
-    
+
     if ts.index is None:
-        assert clone.index is None
+        assert np.all(clone.index == np.arange(len(clone)))
     else:
         assert np.ma.allclose(ts.index, clone.index, atol=get_tol('index', ext))
 
@@ -137,10 +143,10 @@ def get_tol(field, ext):
 
 
 def get_precision(field, ext):
+    cfg = io.txt.CONFIG
     if ext == 'txt':
-        _, precision, _ = io.txt.parse_format_spec(io.txt.CONFIG.columns[field].fmt)
-        return int(precision)
-    return 8
+        return cfg.columns[field].get('precision') or cfg.precision
+    return cfg.precision
 
 
 @pytest.mark.mpl_image_compare(baseline_dir='images/ts/',

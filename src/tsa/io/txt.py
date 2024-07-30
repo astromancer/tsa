@@ -5,22 +5,23 @@ readable forms.
 
 # std
 import re
+import itertools as itt
 from pathlib import Path
 
 # third-party
 import numpy as np
-import more_itertools as mit
+from loguru import logger
 
 # local
 from recipes import api, op
 from recipes.io import read_lines
-from recipes.iter import cofilter
 from recipes.config import ConfigNode
-from recipes.functionals import not_none
+from recipes.containers import split_where
 from recipes.containers.utils import split
 from recipes.pprint.mapping import pformat
 from recipes.string import hstack, remove_prefix
-from recipes.string.unicode import vertical_brace
+from recipes.string.unicode import vertical_brace as vbrace
+from recipes.functionals import not_none
 
 # relative
 from .utils import split_mask, stack_arrays, unstack_arrays
@@ -30,16 +31,13 @@ from .utils import split_mask, stack_arrays, unstack_arrays
 CONFIG = ConfigNode.load_module(__file__, dot_split=True)
 
 # write oflag data to file
-REGEX_FORMAT_SPEC = re.compile(r'%?(\d{0,2})\.?(\d{0,2})([if])')
+REGEX_FORMAT_SPEC = re.compile(r'%[+\- ]?(\d{0,2})\.?(\d{0,2})?([if])')
 
-COLUMN_INFO = 'Column Info'
+COLUMN_SPEC = CONFIG.columns.filter('title_align')
+COLUMN_INFO_NAME = 'Column Info'
+SHAPE_INFO_NAME = 'Table Info'
 UNIT_FORMAT = '[{}]'
 
-
-# U+23aa Sm CURLY BRACKET EXTENSION ⎪
-# U+23ab Sm RIGHT CURLY BRACKET UPPER HOOK ⎫
-# U+23ac Sm RIGHT CURLY BRACKET MIDDLE PIECE ⎬
-# U+23ad Sm RIGHT CURLY BRACKET LOWER HOOK ⎭
 # ---------------------------------------------------------------------------- #
 
 
@@ -59,22 +57,43 @@ def read(filename, *_, **__):
     """
 
     header = read_lines(filename, 25)
-    data = np.loadtxt(filename)
-
-    flags = [bool(op.index(header, f'# {name}', test=str.startswith, default=None))
+    meta_data = read_meta(header)
+    ncols = int(meta_data[SHAPE_INFO_NAME]['n_cols'])
+    flags = [op.index(header, f'# {CONFIG.columns[name].title}',
+                      test=str.startswith, default=None)
              for name in ('index', 'sigma', 'mask')]
-    
-    return unstack_arrays(data, *flags)
+
+    # read
+    data = np.genfromtxt(filename, delimiter=CONFIG.columns.sep,
+                         usecols=range(ncols))
+    data = unstack_arrays(data, *map(not_none, flags))
+    return data, meta_data
 
 
 # alias
 read_text = read
 
 
+def read_meta(lines):
+    data = {}
+    lines = [remove_prefix(line, '# ') for line in lines]
+    sections = split_where(lines, '', offset=1)[1:-1]
+    for name, _, *info, _ in sections:
+        data[name] = dict(read_block(info))
+
+    return data
+
+
+def read_block(text):
+    for line in text:
+        lhs, rhs = line.split(':')
+        yield lhs, rhs.strip()
+
+
 @api.synonyms(values='value')
-def write(filename, index, values, sigma,
-          title=CONFIG.title, col_info=CONFIG.columns,
-          target='', series_type='series', **meta):
+def write(filename, index, values, sigma, mask=None, precision=6,
+          sep=CONFIG.columns.sep, title=CONFIG.title, col_info=COLUMN_SPEC,
+          target='', series_type='series', **metadata):
     """
     Write to text file.
 
@@ -88,6 +107,10 @@ def write(filename, index, values, sigma,
         Data values to write.
     sigma : array
         Standard deviation uncertainty of data values.
+    precision : int
+        Numeric precision for float columns.
+    sep : str
+        Character used to separate columns.
     title : str, optional
         Title for header, by default CONFIG.title
     col_info : 
@@ -97,14 +120,11 @@ def write(filename, index, values, sigma,
     series_type : str
         The type of series that the data represents. This information is written
         to the document header.
-    **meta
+    **metadata
         Meta data for header, by default None
     """
 
-    if meta is None:
-        meta = {}
-
-    # # get the masked values as separate array for saving as column values
+    # get the masked values as separate array for saving as column values
     values, sigma, mask = split_mask(values, sigma)
     _, n_series = values.shape
 
@@ -118,27 +138,92 @@ def write(filename, index, values, sigma,
 
     n_rows, n_cols = data.shape
     shape_info = dict(n_rows=n_rows, n_cols=n_cols, n_series=n_series)
-    # has_oflag = mask is not None
 
-    # avail = ('index', 'value', 'sigma', 'mask')
-    _, col_info = cofilter(not_none, list(map(eval, col_info)), col_info.items())
-    col_info = dict(col_info)
+    # prepare
+    first = True
+    col_details = []
+    col_info = ConfigNode(col_info)
+    for name in ('index', 'values', 'sigma', 'mask'):
+        if (col_data := eval(name)) is None:
+            col_info.pop(name, None)
+            continue
 
-    header, col_fmt_data = make_header(title.format(target), target,
-                                       shape_info, col_info, meta, series_type)
+        # get format
+        spec = dict(col_info[name])
+        unit = spec.get('unit', '')
+        spec['unit'] = UNIT_FORMAT.format(unit) if unit else ''
+        spec.pop('description')
+
+        # auto format
+        spec.setdefault('precision', precision)
+        df, hf, col_width = _auto_format(col_data, **spec, comment_size=2 * first)
+        first = False
+        col_details.append((name, spec['title'], unit, df, hf, col_width))
+
+    # duplicate per series
+    base, per_series = split(col_details, ['index' in col_info])
+    names, titles, units, data_fmt, head_fmt, widths = \
+        zip(*(*base, *(per_series * n_series)))
+
+    # adjust first column for comment
+    if widths[0] > int(parse_format_spec(data_fmt[0])[0]):
+        data_fmt = (data_fmt[0] + '  ', *data_fmt[1:])
+    data_fmt = sep.join((*data_fmt, ''))
+
+    # file header
+    col_details = (names, titles, units, widths, head_fmt)
+    header_info = collect_metadata(title, target, shape_info, col_info,
+                                   series_type, **metadata)
+    header = format_header(header_info, col_details, target, n_series, sep)
 
     # write to file
     with Path(filename).open('w') as fp:
         fp.write(header)
-        np.savetxt(fp, data, col_fmt_data)
+        np.savetxt(fp, data, data_fmt)
 
 
 # alias
 write_text = write
 
 
-def make_header(title, target_name, shape_info, col_info, meta=None,
-                series_type='series'):
+def _auto_format(data, precision, title, unit, comment_size=0):
+
+    dtype = data.dtype.kind
+    mx, mn = data.max(), data.min()
+    neg = mn < 0
+
+    if dtype == 'b':
+        dw = 1
+        df = f'%{dw}i'
+    elif dtype == 'i':
+        dw = len(str(int(data.ptp())))
+        df = f'%{" " * int(neg)}{dw}i'
+    else:
+        # data format
+        mx = np.abs([mx, mn]).max()
+        dw = max(int(np.ceil(np.log10(mx))), 1) + precision + 1
+        df = f'%{" " * int(neg)}{dw}.{precision}f'
+
+    # column format
+    cw = max(len(title), len(unit))  # + 1
+    dw += neg
+    fuckup = dw >= cw
+    cw = max(dw, cw)
+    if fuckup:
+        cw -= comment_size
+
+    if (space := (cw - dw)) > 0:
+        df += ' ' * space
+
+    cf = f'{{: {CONFIG.columns.title_align}{cw}s}}'
+
+    logger.debug('Column {!r}: data_fmt: {!r}, col_fmt: {!r}', title, df, cf)
+
+    return df, cf, cw
+
+
+def collect_metadata(title, target_name, shape_info, col_info,
+                     series_type='series', **metadata):
     """
     Make a header for the file.
 
@@ -150,139 +235,79 @@ def make_header(title, target_name, shape_info, col_info, meta=None,
         Name of the target object.
     shape_info : dict
         Information about the shape of the data.
-    col_info : dict
-        Information about the data contained available for each sequence. This
-        is a dict with up to 4 items, keyed on the column data type (index,
-        value, sigma, mask). The dict values are dicts with 'title',
-        'description', 'fmt' and 'unit' entries.
-    meta : dict, optional
+    col_info : dict[dict]
+        Info for the columns. The dict is keyed on the column variate
+        type (index, value, sigma, mask). Fields are dicts with 
+        'title' and 'description' for each column.
+    metadata : dict, optional
         Meta data for the header, by default None.
     series_type : str, optional
         Type of series, by default 'series'.
 
     Returns
     -------
-    tuple
-        Header string and column format string for the data.
+    dict
+        Meta data to save in file header.
     """
-
-    if meta is None:
-        meta = {}
-    # todo: delimiter ??
 
     # get column info
     n_series = shape_info['n_series']
-    col_headers, col_info = get_column_info(n_series, col_info, series_type)
 
-    # adjust the formatters
-    names, units, formats = zip(*col_headers)
-    widths, fmt_head, fmt_data = make_column_format(names, units, formats)
+    # format column name: description
+    titles = col_info.find('title', collapse=True)
+    descriptions = col_info.find('description', collapse=True)
 
-    info = {
-        #  title, table shape info
-        f'# {title}': shape_info,
+    offset = int('index' in descriptions)
+    postscript = vbrace(len(descriptions) - offset, f'x{n_series} {series_type}')
+    info_block = hstack(['\n'.join(descriptions.values()), postscript],
+                        spacing=3, offsets=offset, rstrip=True)
+    descriptions = dict(zip(titles.values(), info_block.splitlines()))
+
+    return {
+        # title, table shape info
+        f'# {title.format(target_name)}': '',
+        SHAPE_INFO_NAME:  shape_info,
         # column descriptions
-        COLUMN_INFO: col_info,
-        **meta
+        COLUMN_INFO_NAME: descriptions,
+        **metadata
     }
 
-    # column headers block
-    lines = _gen_header_lines(info, target_name, n_series,
-                              (names, units, widths, fmt_head))
-    return '\n'.join(lines).replace('\n', '\n# ')[:-2], fmt_data
+
+def format_header(header_info, col_details, target_name, n_series, sep):
+    lines = _gen_header_lines(header_info, col_details, target_name, n_series, sep)
+    return '\n'.join(lines).replace('\n', '\n# ')[:-2]
 
 
-def get_column_info(n_series, col_info, series_type='series'):
-    """
-    Get column information.
+def _gen_header_lines(header_info, col_details, target_name, n_series, sep):
 
-    Parameters
-    ----------
-    n_series : int
-        Number of series.
-    col_info : dict
-        Column information.
-    series_type : str, optional
-        Type of series, by default 'series'.
+    names, titles, units, widths, head_fmt = col_details
 
-    Returns
-    -------
-    tuple
-        Names, units, formats, and info for the columns.
-    """
+    # header blocks for additional meta data
+    yield from map(header_info_block, *zip(*header_info.items()))
 
-    col_info, descriptions = ConfigNode(col_info).split('description')
+    # section divider
+    yield (hline := '-' * (sum(widths) + len(names) * len(sep)))
 
-    # column descriptions
-    descriptions = descriptions.find('description', collapse=True)
-    offset = int('index' in descriptions)
-    info_text = hstack(('\n'.join(descriptions.values()),
-                       vertical_brace(len(descriptions) - offset,
-                                      f'x{n_series} {series_type}')),
-                       spacing=3, offsets=offset, rstrip=True)
-    descriptions.update(zip(descriptions.keys(), info_text.splitlines()))
+    # object names
+    n_cols = len(names)
+    n_col_per_series = len(set(header_info[COLUMN_INFO_NAME].keys())) - 1
+    gsep = [sep] + ([' ' * len(sep)] * (n_col_per_series - 1) + [sep]) * n_series
+    target_names = [target_name or 'C0', *map('C{}'.format, range(1, n_series))]
 
-    # build column headers
-    headers = [
-        (info['title'],
-         UNIT_FORMAT.format(u) if (u := info['unit']) else '',
-         '%{}'.format(remove_prefix(info['fmt'], '%')))
-        for info in col_info.values()
-    ]
+    col_group_heads = [' ' * len(sep)] * n_cols
+    for i, j in enumerate(range(1, n_cols, n_col_per_series)):
+        col_group_heads[j] = target_names[i]
 
-    base, per_series = split(headers, ['index' in col_info])
-    headers = [*base, *(per_series * n_series)]
+    target_names_fmt = ''.join(map(''.join, zip(head_fmt, gsep))).replace('^', '<')
+    yield target_names_fmt.format(*col_group_heads)
 
-    return headers, descriptions
+    # column titles
+    col_head_fmt = sep.join((*head_fmt, ''))
+    yield from itt.starmap(col_head_fmt.format, (titles, units))
 
-
-def make_column_format(names, units, formats):
-    """
-    Adjust the column format specifiers to accommodate width of the column names.
-
-    Parameters
-    ----------
-    names : list
-        List of column names.
-    formats : list
-        List of format specifiers.
-
-    Returns
-    -------
-    tuple
-        Column widths, format string for the header, and format string for the data.
-    """
-    widths, precisions, dtypes = check_column_widths(names, units, formats)
-    col_fmt_head = ''.join(map('%%-%is'.__mod__, [widths[0] - 2, *widths[1:]]))
-    col_fmt_data = ''.join(map('%%-%i.%s%s'.__mod__,
-                               zip(widths, precisions, dtypes)))
-    return widths, col_fmt_head, col_fmt_data
-
-
-def check_column_widths(names, units, formats):
-    """
-    Check and adjust column widths based on names and format specifiers.
-
-    Parameters
-    ----------
-    names : list
-        List of column names.
-    formats : list
-        List of format specifiers.
-
-    Returns
-    -------
-    tuple
-        Three lists containing widths, precisions, and data types.
-    """
-    return tuple(zip(*_check_column_widths(names, units, formats)))
-
-
-def _check_column_widths(names, units, formats):
-    for name, unit, fmt in zip(names, units, formats):
-        width, precision, dtype = parse_format_spec(fmt)
-        width = max(int(width or 1), len(name) + 1, len(unit) + 1)
-        yield width, precision, dtype
+    # section divider
+    yield hline
+    yield ''  # advance to new line
 
 
 def parse_format_spec(fmt):
@@ -310,35 +335,6 @@ def parse_format_spec(fmt):
         raise ValueError('Invalid format specifier!')
 
 
-def _gen_header_lines(header_info, target_name, n_series, col_spec):
-
-    *col_names_units, col_widths, col_fmt_head = col_spec
-
-    # header blocks for additional meta data
-    yield from map(header_info_block, *zip(*header_info.items()))
-    # section divider
-    yield (hline := '-' * (sum(col_widths) - 2))
-
-    # object names
-    n_col_per_series = len(set(header_info[COLUMN_INFO].keys()) - {'index'})
-    target_names = ('', target_name, *(f'C{i}' for i in range(n_series - 1)))
-    yield _make_name_format(col_widths, n_col_per_series) % target_names
-
-    # column titles
-    for o in col_names_units:
-        yield col_fmt_head % tuple(o)
-
-    # section divider
-    yield hline
-    yield ''  # advance to new line
-
-
-def _make_name_format(col_widths, n_col_per_series):
-    w0, *ww = col_widths
-    w2 = map(sum, mit.grouper(ww, n_col_per_series, fillvalue=ww))  # 2-column widths
-    return ''.join('%%-%is' % w for w in [w0 - 2, *w2])
-
-
 def header_info_block(name, info):
     """
     Create a header information block.
@@ -362,7 +358,12 @@ def _header_info_block(name, info):
     if name:
         yield underline_ascii(name)
 
-    yield pformat(info, name='', lhs=str,  rhs=get_name, brackets='', sep='')
+    if isinstance(info, str):
+        if info:
+            yield info
+    else:
+        yield pformat(info, name='', lhs=str,  rhs=get_name, brackets='', sep='')
+
     yield ''
 
 

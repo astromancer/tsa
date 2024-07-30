@@ -59,11 +59,7 @@ def unstack_arrays(data, has_index, has_sigma, has_mask):
     return index, values, sigma
 
 
-# def apply_mask(values, mask):
-    
-    
-
-def split_mask(values, sigma):
+def split_mask(values, sigma, mask=None):
 
     values = np.asanyarray(values).squeeze()
     if have_sigma := sigma is not None:
@@ -74,7 +70,6 @@ def split_mask(values, sigma):
         if have_sigma:
             sigma = sigma[:, None]
 
-    mask = None
     if np.ma.is_masked(values) or np.ma.is_masked(sigma):
         mask = np.ma.getmaskarray(values) | np.ma.getmaskarray(sigma)
 

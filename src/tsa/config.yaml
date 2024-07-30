@@ -1,29 +1,23 @@
 # ---------------------------------------------------------------------------- #
 io.txt:
     title:  'Time Series: {}'
-
+    precision:      6       # for floats. Can also be given per column below
     # columns [name, unit, description]
     columns:
         index: 
             title:          Time
             description:    Time stamp
-            fmt:            18.9f
             unit:           ''
         values: 
             title:          x
             description:    Data value
-            fmt:            12.6f
             unit:           ''
         sigma:   
             title:          σ
             description:    Standard deviation uncertainty of data value
-            fmt:            12.6f
-            unit:           ''
         mask: 
-            title:          oflag
-            description:    Outlier flag
-            fmt:            6i
-            unit:           ''
+            title:          mask
+            description:    Censored data
 
 
 # ---------------------------------------------------------------------------- #
