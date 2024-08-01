@@ -153,7 +153,7 @@ class MeasurementSequence(LoggingMixin):
         return super().__new__(cls)
 
     # ------------------------------------------------------------------------ #
-    def __init__(self, *args, **kws):
+    def __init__(self, *args, **metadata):
         """
         Create a TimeSeries object.
 
@@ -169,6 +169,7 @@ class MeasurementSequence(LoggingMixin):
         self.value = value
         self.index = index  # must be after set_value
         self.sigma = sigma
+        self.metadata = metadata
 
     @staticmethod
     def _parse_init_args(index, value=None, sigma=None):
@@ -187,16 +188,15 @@ class MeasurementSequence(LoggingMixin):
     @classmethod
     def read(cls, filename, *_, **__):
         data, meta = io.read(filename)
-        # TODO: metadata
-        return cls(*data)
+        return cls(*data, **meta)
 
-    def write(self, filename, **kws):
+    def write(self, filename):
 
         data = self
         if self.index is None:
             data = (np.arange(self.n), self.value, self.sigma)
 
-        return io.write(filename, *data, **kws)
+        return io.write(filename, *data, **self.metadata)
 
     # aliases
     load = Alias('read')
@@ -277,8 +277,8 @@ class MeasurementSequence(LoggingMixin):
         sigma = self._check_array(sigma)
 
         # check valid values
-        if np.any(sigma < 0):
-            raise ValueError('Cannot have negative uncertainties.')
+        if np.any(bad := (sigma < 0)):
+            raise ValueError(f'Cannot have negative uncertainties: {np.where(bad)}')
 
         # check shape same as values
         self._check_against_value(sigma, 'uncertainty')

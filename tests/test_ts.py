@@ -109,16 +109,25 @@ def test_negative_uncertainty():
         TimeSeries([0, 1], [1, 1], [1, -1])
 
 
-@pytest.mark.parametrize('ext', io.SUPPORTED)
+@pytest.mark.parametrize('ext', io.SupportedFormats.supported())
 def test_io(case_data, ext):
 
     # init
     ts = TimeSeries(*case_data)
 
+    # metadata
+    generic = 'Generic Meta Data'
+    metadata = {'a': 'Some text',
+                'b': 1,
+                'c': 12.34567890}
+    ts.metadata = {generic: metadata}
+
     # write
-    # suf = 'i' * (ts.index is not None) + 'σ' * (ts.sigma is not None) + 'm' * np.ma.is_masked(ts.x)
-    # name = DATA_FOLDER / f'{ts.m}-{ts.n}-{suf}.{ext}'
-    fp, name = tmp.mkstemp(f'.{ext}', dir=DATA_FOLDER)
+    var = ('i' * (ts.index is not None) +
+           'σ' * (ts.sigma is not None) +
+           'm' * np.ma.is_masked(ts.x))
+    fp, name = tmp.mkstemp(f'.{ext}', prefix=f'{ts.m}-{ts.n}-{var}') 
+    # dir=DATA_FOLDER
     ts.save(name)
 
     # test read
@@ -127,15 +136,21 @@ def test_io(case_data, ext):
     # compare
     assert np.ma.allclose(ts.value, clone.value, atol=get_tol('values', ext))
 
+    # index
     if ts.index is None:
         assert np.all(clone.index == np.arange(len(clone)))
     else:
         assert np.ma.allclose(ts.index, clone.index, atol=get_tol('index', ext))
 
+    # uncertainty
     if ts.sigma is None:
         assert clone.sigma is None
     else:
         assert np.ma.allclose(ts.sigma, clone.sigma, atol=get_tol('sigma', ext))
+
+    # check metadata
+    if ext != 'npy':
+        assert metadata == clone.metadata[generic]
 
 
 def get_tol(field, ext):

@@ -16,12 +16,12 @@ from loguru import logger
 from recipes import api, op
 from recipes.io import read_lines
 from recipes.config import ConfigNode
+from recipes.functionals import not_none
 from recipes.containers import split_where
 from recipes.containers.utils import split
 from recipes.pprint.mapping import pformat
 from recipes.string import hstack, remove_prefix
 from recipes.string.unicode import vertical_brace as vbrace
-from recipes.functionals import not_none
 
 # relative
 from .utils import split_mask, stack_arrays, unstack_arrays
@@ -58,7 +58,9 @@ def read(filename, *_, **__):
 
     header = read_lines(filename, 25)
     meta_data = read_meta(header)
+
     ncols = int(meta_data[SHAPE_INFO_NAME]['n_cols'])
+
     flags = [op.index(header, f'# {CONFIG.columns[name].title}',
                       test=str.startswith, default=None)
              for name in ('index', 'sigma', 'mask')]
@@ -66,6 +68,11 @@ def read(filename, *_, **__):
     # read
     data = np.genfromtxt(filename, delimiter=CONFIG.columns.sep,
                          usecols=range(ncols))
+
+    # if filename.name == '20150228.020._X2.raw.txt':
+    #     from IPython import embed
+    #     embed(header="Embedded interpreter at 'src/tsa/io/txt.py':73")
+
     data = unstack_arrays(data, *map(not_none, flags))
     return data, meta_data
 
@@ -84,10 +91,19 @@ def read_meta(lines):
     return data
 
 
+def convert_numeric(string):
+    if string.isdigit():
+        return int(string)
+    try:
+        return float(string)
+    except ValueError:
+        return string
+
+
 def read_block(text):
     for line in text:
-        lhs, rhs = line.split(':')
-        yield lhs, rhs.strip()
+        lhs, rhs = line.split(':', 1)
+        yield lhs, convert_numeric(rhs.strip())
 
 
 @api.synonyms(values='value')
