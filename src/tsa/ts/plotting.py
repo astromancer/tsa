@@ -20,6 +20,7 @@ from mpl_toolkits.axes_grid1.parasite_axes import SubplotHost
 # local
 from recipes import api, dicts
 from recipes.config import ConfigNode
+from recipes.oo.property import Alias
 from recipes.string import named_items
 from scrawl.moves import MovableErrorbar
 from scrawl.utils import get_percentiles
@@ -466,6 +467,8 @@ class TimeSeriesPlot(Interface):
 
     # TODO: evolve to multiprocessed TS plotter.
 
+    figure = Alias('fig')
+    
     def __init__(self, title='', hist=(), plims=CONFIG.axes.plims,
                  colors=None, cmap=None, max_points=1e4, **kws):
 
