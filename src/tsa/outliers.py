@@ -194,11 +194,11 @@ class MovingWindowDetection(MovingWindowAnalysis):
     def collect(self, index, result):
         self.results[result] = True
 
-    def finalize(self, **kws):
-        # results = super().finalize(self, **kws)
+    # def finalize(self, **kws):
+    #     results = super().finalize(self, **kws)
 
-        from IPython import embed
-        embed(header="Embedded interpreter at 'src/tsa/outliers.py':205")
+    #     from IPython import embed
+    #     embed(header="Embedded interpreter at 'src/tsa/outliers.py':205")
         
     #     if len(widx):
     #         didx = i * step + np.array(widx)  # indices relative to data
