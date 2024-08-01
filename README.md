@@ -2,16 +2,17 @@
 
 <!-- 
 TODO
-[![Build Status](https://travis-ci.com/astromancer/tsa.svg?branch=master)](https://travis-ci.com/astromancer/tsa)
+[![Build Status](https://travis-ci.com/astromancer/tsa.svg?branch=main)](https://travis-ci.com/astromancer/tsa)
 [![Documentation Status](https://readthedocs.org/projects/tsa/badge/?version=latest)](https://tsa.readthedocs.io/en/latest/?badge=latest)
 [![PyPI](https://img.shields.io/pypi/v/tsa.svg)](https://pypi.org/project/tsa)
 [![GitHub](https://img.shields.io/github/license/astromancer/tsa.svg?color=blue)](https://tsa.readthedocs.io/en/latest/license.html)
  -->
 
-This project is for Time Series Analysis and Frequency Spectral Estimation. It
-allows for convenient computation of periodograms and spectrograms (aka Dynamic
-Power Spectra) as well as enabling plotting of multivariate time series and
-interactive Time-Frequency Representations of data.
+This project is for Time Series Analysis and Spectral Density Estimation. It
+allows for convenient computation of periodograms (aka Power Density Spectra)
+and spectrograms (aka Dynamic Power Spectra) as well as enabling plotting of
+multivariate time series and interactive Time-Frequency Representations of such
+data.
 
 
 # Install
@@ -43,7 +44,7 @@ ts = TimeSeries(t, signal, errors)
 tsp = ts.plot()
 ```
 
-![Time Series Plot](https://github.com/astromancer/tsa/blob/master/tests/images/test_readme_example_0.png?raw=True "Basic Time Series Plot")
+![Time Series Plot](https://github.com/astromancer/tsa/blob/main/tests/images/test_readme_example_0.png?raw=True "Basic Time Series Plot")
 
 ## Periodogram
 As an example, we generate a multi-tone harmonic signal using the built in
@@ -59,13 +60,13 @@ harmonic = Harmonic(amplitudes=[5, 4.3, 2.7],
                     frequencies=[1.35, 20.27, 51.3])
 ts = TimeSeries(t, harmonic(t))
 # compute the periodogram
-pg = ts.periodogram(normalize='rms')
+pg = ts.periodogram(norm='rms')
 # plot
 fig, (ax0, ax1) = plt.subplots(2, 1)
 ts.plot(ax=ax0)
 pg.plot(ax=ax1)
 ```
-![Periodogram Plot](https://github.com/astromancer/tsa/blob/master/tests/images/test_readme_example_1.png?raw=True "Basic Periodogram Plot")
+![Periodogram Plot](https://github.com/astromancer/tsa/blob/main/tests/images/test_readme_example_1.png?raw=True "Basic Periodogram Plot")
 
 
 ## Spectrogram and Time-Frequency Representations
@@ -73,10 +74,11 @@ To demonstrate the spectrogram, we generate a multi-component signal
 consisting of two superposed time series: 
 * A harmonic signal with constant tone at 10 Hz
 * An amplitude- and frequency modulated signal. 
-We compute the spectrogram using `TimeSeries.spectrogram`, and plot a Time-Frequency
-Representation of the data.
+We compute the spectrogram using `TimeSeries.spectrogram`, and plot a
+Time-Frequency Representation of the data.
 
 ```python
+# parameters
 fs = 100                                            # sampling frequency
 fc = 25                                             # carier signal
 fm = 0.1                                            # modulation frequency
@@ -88,11 +90,11 @@ signalA = Harmonic(2, 10)(t)
 signalB =  a * np.cos(2 * np.pi * fc * t + (Δf / fm) * np.sin(2 * np.pi * fm * t))
 
 ts = TimeSeries(t, signalA + signalB)
-sg = ts.spectrogram(nwindow=128, noverlap='50%', normalize='rms')
+sg = ts.spectrogram(nwindow=128, noverlap='50%', norm='rms')
 tfr = sg.plot()
 ```  
 
-![Time Frequency Map](https://github.com/astromancer/tsa/blob/master/tests/images/test_readme_example_2.png?raw=True "Time Frequency Map")
+![Time Frequency Map](https://github.com/astromancer/tsa/blob/main/tests/images/test_readme_example_2.png?raw=True "Time Frequency Map")
 
 ## Interactive features
 To activate the interactive features of the map:
@@ -130,11 +132,11 @@ Contributions are welcome!
 * e-mail: hannes@saao.ac.za
 
 <!-- ### Third party libraries
- * see [LIBRARIES](https://github.com/username/sw-name/blob/master/LIBRARIES.md) files -->
+ * see [LIBRARIES](https://github.com/username/sw-name/blob/main/LIBRARIES.md) files -->
 
 # License
 
-* see [LICENSE](https://github.com/astromancer/tsa/blob/master/LICENSE)
+* see [LICENSE](https://github.com/astromancer/tsa/blob/main/LICENSE)
 
 <!-- 
 # Version
