@@ -39,10 +39,10 @@ def show_all_windows(cmap='gist_rainbow', size=1024):
     windows = scipy.signal.windows.__all__
     ax.set_color_cycle(cm(np.linspace(0, 1, len(windows))))
 
-    winge = ftl.partial(scipy.signal.get_window, Nx=size)
-    for w in windows:
+    get_window = ftl.partial(scipy.signal.get_window, Nx=size)
+    for name in windows:
         with contextlib.suppress(Exception):
-            plt.plot(winge(w), label=w)
+            plt.plot(get_window(name), label=name)
 
     plt.legend()
     plt.show()
