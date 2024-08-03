@@ -41,7 +41,7 @@ UNIT_FORMAT = '[{}]'
 # ---------------------------------------------------------------------------- #
 
 
-def read(filename, *_, **__):
+def read(filename, *_, order=..., **kws):
     """
     Read data from a file
 
@@ -56,7 +56,7 @@ def read(filename, *_, **__):
         Time stamps, data values, standard deviation uncertainty of data.
     """
 
-    header = read_lines(filename, 25)
+    header = read_lines(filename, 35)
     meta_data = read_meta(header)
 
     ncols = int(meta_data[SHAPE_INFO_NAME]['n_cols'])
@@ -73,7 +73,13 @@ def read(filename, *_, **__):
     #     from IPython import embed
     #     embed(header="Embedded interpreter at 'src/tsa/io/txt.py':73")
 
-    data = unstack_arrays(data, *map(not_none, flags))
+    index, values, sigma = unstack_arrays(data, *map(not_none, flags))
+
+    if sigma is not None:
+        sigma = sigma[:, order]
+
+    data = (index, values[:, order], sigma)
+
     return data, meta_data
 
 
@@ -205,6 +211,12 @@ write_text = write
 def _auto_format(data, precision, title, unit, comment_size=0):
 
     dtype = data.dtype.kind
+    if np.ma.is_masked(data):
+        data = data.compressed()
+        
+    data = data[~np.isnan(data)]
+    assert data.size
+        
     mx, mn = data.max(), data.min()
     neg = mn < 0
 
@@ -212,7 +224,7 @@ def _auto_format(data, precision, title, unit, comment_size=0):
         dw = 1
         df = f'%{dw}i'
     elif dtype == 'i':
-        dw = len(str(int(data.ptp())))
+        dw = len(str(int(mx - mn)))
         df = f'%{" " * int(neg)}{dw}i'
     else:
         # data format

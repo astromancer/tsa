@@ -190,13 +190,13 @@ class MeasurementSequence(LoggingMixin):
         data, meta = io.read(filename)
         return cls(*data, **meta)
 
-    def write(self, filename):
+    def write(self, filename, **kws):
 
         data = self
-        if self.index is None:
+        if io.SupportedFormats(filename).value == 'txt' and self.index is None:
             data = (np.arange(self.n), self.value, self.sigma)
 
-        return io.write(filename, *data, **self.metadata)
+        return io.write(filename, *data, **self.metadata, **kws)
 
     # aliases
     load = Alias('read')

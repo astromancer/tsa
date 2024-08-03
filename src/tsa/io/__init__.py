@@ -33,7 +33,7 @@ class _SupportedFormats(Enum):
 
     @classmethod
     def supported(cls):
-        return [x.value for x in cls]
+        return tuple(x.value for x in cls)
 
     @classmethod
     def check(cls, file):
