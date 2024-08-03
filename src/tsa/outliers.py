@@ -7,7 +7,7 @@ from astropy.stats import sigma_clipped_stats
 from recipes.array import fold
 
 # relative
-from .windowing import MovingWindowAnalysis, resolve_size
+from .window import MovingWindowAnalysis, resolve
 
 
 # ---------------------------------------------------------------------------- #
@@ -55,7 +55,7 @@ def generalizedESD(x, kmax='0.02%', alpha=0.05, full_output=False):
 
     from scipy.stats import t
 
-    kmax = resolve_size(kmax, len(x))
+    kmax = resolve.size(kmax, len(x))
 
     xm = np.ma.array(x.copy())
     n = len(xm)
@@ -215,7 +215,7 @@ class MovingWindowDetection(MovingWindowAnalysis):
 #                   method=gESD, weight_kernel='boxcar', threshold=0.5,
 #                   *args, **kws):
 
-#     noverlap = resolve_overlap(nwindow, noverlap)
+#     noverlap = resolve.overlap(nwindow, noverlap)
 
 #     assert data.ndim == 1
 

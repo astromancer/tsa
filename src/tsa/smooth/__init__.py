@@ -4,9 +4,6 @@ import itertools as itt
 # third-party
 import numpy as np
 
-# local
-from recipes.array.fold import resolve_size
-
 # relative
 from .. import window as wdw
 from . import tv
@@ -58,7 +55,7 @@ class KernelSmoother:
             raise ValueError(f'{type(self).__name__} only accepts 1D arrays.')
 
         # resolve window size
-        wsize = resolve_size(wsize, len(x))
+        wsize = wdw.resolve.size(wsize, len(x))
 
         if x.size < wsize:
             raise ValueError('Input vector needs to be bigger than window size.')
