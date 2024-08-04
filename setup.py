@@ -72,15 +72,6 @@ class GitIgnore:
         self.names = (*IGNORE_IMPLICIT, *names)
         self.patterns = tuple(patterns)
 
-    def match(self, filename):
-        path = Path(filename).relative_to(self.root)
-        filename = str(path)
-        for pattern in self.patterns:
-            if fnmatch.fnmatchcase(filename, pattern):
-                return True
-
-        return filename.endswith(self.names)
-
     def iter(self, folder=None, depth=any, _level=0):
         depth = math.inf if depth is any else depth
         folder = folder or self.root
