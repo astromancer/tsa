@@ -2,12 +2,10 @@
 import ossaudiodev as sd
 
 import scipy
-from scipy.optimize import leastsq
 import numpy as np
 from IPython.display import Audio
 
 from recipes.misc import is_interactive
-from obstools.psf.model import Model
 
 from .spectral import Spectral, normaliser
 

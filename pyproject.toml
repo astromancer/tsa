@@ -26,7 +26,6 @@ dependencies = [
 
     "matplotlib", 
 
-    "obstools", 
     "recipes", 
     "scrawl"
 ]
