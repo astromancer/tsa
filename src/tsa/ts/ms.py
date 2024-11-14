@@ -201,6 +201,7 @@ class MeasurementSequence(LoggingMixin):
     # aliases
     load = Alias('read')
     save = Alias('write')
+    values = Alias('value')
 
     # Time
     # ------------------------------------------------------------------------ #
@@ -299,7 +300,7 @@ class MeasurementSequence(LoggingMixin):
     # ------------------------------------------------------------------------ #
     def __getitem__(self, key):
         data = self._value[key]
-        kls = MeasurementSequence if len(data) else tuple
+        kls = type(self) if len(data) else tuple
         return kls(None if self.index is None else self.index[key],
                    data,
                    None if self.u is None else self.sigma[key])
@@ -463,7 +464,7 @@ class MeasurementSequence(LoggingMixin):
     # Transformations
     # ------------------------------------------------------------------------ #
 
-    def normalize(self, loc='mean', scale='std', start=0, scale_index='ptp'):
+    def normalize(self, loc='mean', scale='std', start=None, scale_index='ptp'):
 
         y = self.value
         v = self.sigma

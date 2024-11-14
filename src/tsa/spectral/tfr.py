@@ -321,7 +321,7 @@ class TimeFrequencyBase:
         spec = self.spec
         nwin, novr = spec.nwindow, spec.noverlap
         info = (
-            rf'$\Delta t = {spec.dt:.3f}$ s ($f_s = {spec.fs:.3f}$ Hz)',
+            Rf'$\Delta t = {spec.dt:.3f}$ s ($f_s = {spec.fs:.3f}$ Hz)',
             f'window = {spec.window}',
             f'$n_w = {nwin:d}$ ({nwin * spec.dt:.1f} s)',
             f'$n_{{ovr}} = {novr:d}$ ({novr / nwin:.0f%%})'
@@ -448,7 +448,7 @@ class TimeFrequencyMap(TimeFrequencyBase, CallbackManager):
         x, _ = tspan = self.spec.t_seg[ix, (0, -1)]
         # NOTE padded values not included here
         # TODO: maybe some visual indicator for padding??
-        self.hover.update(x, tspan.ptp(), spectrum)
+        self.hover.update(x, np.ptp(tspan), spectrum)
 
     def highlight_section(self):
         # persistent highlight this window
