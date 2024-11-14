@@ -2,23 +2,18 @@
 Time series objects
 """
 
-# std
-import numbers as nr
-import itertools as itt
-
 # third-party
 import numpy as np
-from scipy.signal import correlate
 
 # local
-from recipes.concurrency import Executor
+from recipes.oo.property import Alias
 
 # relative
 from ..smooth import KernelSmoother, tv
 from .interface import Interface
-from .ms import MeasurementSequence, MultiVariate
 from .plotting import TimeSeriesPlot
-from recipes.oo.property import Alias
+from .ms import MeasurementSequence, MultiVariate
+
 
 # ---------------------------------------------------------------------------- #
 # import uncertainties.unumpy as unp  # linear uncertainty propagation
@@ -184,7 +179,7 @@ class TimeSeries(MeasurementSequence):
     smooth = Smoothing()
     # mwa
     # ------------------------------------------------------------------------ #
-    
+
     # Time
     # ------------------------------------------------------------------------ #
     t = Alias('index')
@@ -197,46 +192,25 @@ class TimeSeries(MeasurementSequence):
     def periodogram(self, window=None, detrend=None, pad=None, norm=None, **kws):
         from tsa.spectral import Periodogram
 
-        return Periodogram(window, detrend, pad, norm).fit(self.t, self.x, **kws)
+        return Periodogram.fit(self.t, self.x, window=window, detrend=detrend,
+                               pad=pad, norm=norm, **kws)
 
     def spectrogram(self, nwindow, noverlap=0, window='hanning', detrend=None,
                     pad=None, split=None, norm=False, **kws):
         from tsa.spectral import Spectrogram
 
-        return Spectrogram(nwindow, noverlap, window, detrend,
-                           pad, split, norm).fit(self.t, self.x, **kws)
+        return Spectrogram.fit(self.t, self.x,
+                               nwindow=nwindow, noverlap=noverlap,
+                               window=window, detrend=detrend,
+                               pad=pad, split=split, norm=norm, **kws)
 
     def correlogram(self, max_lag=None, method=None, njobs=-1):
+        from tsa.spectral import Correlogram
 
-        if method is None:
-            method = 'direct' if np.ma.is_masked(self.x) else 'fft'
-        else:
-            method = str(method).lower()
+        Correlogram(max_lag, method, njobs)
 
-        assert method in {'fft', 'direct'}
-
-        max_lag = int(max_lag or self.n)
-        top = max_lag
-        t = self.t[:top] - self.t[0]
-
-        self.logger.info('Computing Auto-correlation spectrum via {} method.', method)
-        sv = self.normalize()
-
-        if method == 'direct':
-            return type(self)(t, _acf_direct(sv.x, max_lag, njobs).T)
-
-        # FFT method
-        x = sv.impute(emit='warning').x
-        v = np.ma.empty((self.m, max_lag))
-        for i, x in enumerate(x[(..., *[np.newaxis] * (self.m == 1))].T):
-            c = correlate(x, x, 'full')
-            v[i] = c[self.n - 1:]
-
-        # normalize
-        norm = np.sum(x ** 2, 0, keepdims=True)
-        return type(self)(t, (v / norm).T)
-
-    acf = correlogram
+    #
+    acf = Alias('correlogram')
 
     # ------------------------------------------------------------------------ #
     # def fold(self, eph):
@@ -244,6 +218,10 @@ class TimeSeries(MeasurementSequence):
 
 class MultiVariateTimeSeries(MultiVariate, TimeSeries):
     """Multivariate Time Series"""
+
+    def corner(self, *args, **kws):
+        return corner(self.values, *args, **kws)
+    
     
 
 # alias

@@ -5,31 +5,29 @@ Tools for Frequency Spectral Estimation (a.k.a. Fourier Analysis)
 
 # std
 import textwrap as txw
-import functools as ftl
 import itertools as itt
 from warnings import warn
 
 # third-party
+import scipy
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy
-from scipy.signal import correlate
-from loguru import logger
 
 # local
+from recipes import api
 from recipes.array import fold
 from recipes.config import ConfigNode
-from recipes.oo.property import Alias
 from recipes.functionals import raises
 from recipes.oo.slots import SlotHelper
-from recipes.concurrency import Executor
+from recipes.concurrence import Executor
 from recipes.logging import LoggingMixin
 from recipes.oo.represent import Represent
-from recipes.oo.property import cached_property
+from recipes.oo.property import Alias, cached_property
 
 # relative
-from .. import io, timing, detrend as dtr, window as wdw, ts
+from .. import timing, ts, detrend as dtr, window as wdw
 from ..ts.ms import MeasurementSequence
+from .tfr import TimeFrequencyRepresentation
 
 
 # ---------------------------------------------------------------------------- #
@@ -48,14 +46,12 @@ PADDING = ('constant', 'mean', 'median', 'minimum', 'maximum', 'reflect',
 #   more unit tests!!!
 
 
-def periodogram(signal, dt=None, norm=None):
+def periodogram(signal, window=None, detrend=None, pad=None, norm=None, dt=1, **kws):
     """
     Compute FFT power (aka periodogram). optionally normalize and or detrend
     """
-    # since we are dealing with real signals, spectrum is symmetric
-    PowerSpectrumEstimator(normalize=norm).fit(signal, dt=dt)
-    # normalizer = Normalizer(norm)
-    # return normalizer(fft_power(signal), signal)
+    return Periodogram.fit(signal, dt=dt, window=window, detrend=detrend,
+                           pad=pad, norm=norm, **kws)
 
 
 def pds(signal, dt=None):
@@ -115,7 +111,7 @@ def _resolve_padding(nwindow, dt, args):
     size, method, *kws = args
     assert method in PADDING
 
-    size = wdw.resolve_size(size, nwindow, dt)
+    size = wdw.resolve.size(size, nwindow, dt)
 
     if size < nwindow:
         raise ValueError(
@@ -163,8 +159,8 @@ class Spectrum(MeasurementSequence):
         sde.estimator = estimator
         return sde
 
-# ---------------------------------------------------------------------------- #
 
+# ---------------------------------------------------------------------------- #
 
 class UniformFFT(SpectralEstimator):
     """
@@ -292,7 +288,7 @@ class Normalizer:
         if self._name != how:
             del self.scale
             self._name = how
-            
+
         # return how
 
     def __get__(self, sde, kls=None):
@@ -312,7 +308,7 @@ class Normalizer:
         extra = ''
         if self.sde and self.name:
             extra = (
-                f', scale={self.scale:g}'
+                f', scale={self.scale}'
                 f', unit={self.POWER_UNITS.get(self.name, "")}')
 
         return f'{type(self).__name__}({self.name}{extra})'
@@ -364,8 +360,9 @@ class PowerSpectrum(Spectrum):
     norm = Normalizer()
     estimator = UniformFFT
 
-    __repr__ = Represent(['n'], maybe=['norm.name'], remap={'norm.name': 'norm'})
+    __repr__ = Represent(['n'], maybe=['norm.name'], rename={'norm.name': 'norm'})
 
+    @api.synonyms({'norm(ali[sz]e)?':  'norm'})
     def __init__(self, frq, power, sigma=None, /, norm=False):
         super().__init__(frq, power, sigma)
         self.norm = norm
@@ -459,7 +456,7 @@ class PowerSpectrum(Spectrum):
                yscale='log')
         ax.grid()
         ax.figure.tight_layout()
-        return fig, ax
+        return ax.figure, ax
 
     def get_xlabel(self):
         return 'Frequency (Hz)'
@@ -488,7 +485,7 @@ class PowerSpectrumEstimator(UniformFFT):
     #     'overlap':          'noverlap',
     #     'kct':              'dt
     # })
-    def __init__(self, window=None, detrend=None, pad=None, /, strict=True):
+    def __init__(self, window=None, detrend=None, pad=None, *, strict=True):
 
         # UniformFFT
         super().__init__(strict)
@@ -521,6 +518,7 @@ class PowerSpectrumEstimator(UniformFFT):
 
     def compute(self, signal):
         # compute spectral power
+
         power = np.square(np.abs(super().compute(signal)))
 
         # NOTE: We normalise the fft such that Parceval's theorem holds true.
@@ -543,16 +541,16 @@ class Periodogram(PowerSpectrum):
 # ---------------------------------------------------------------------------- #
 
 class STFT(PowerSpectrumEstimator):
+    # TODO: use MovingWindowAnalysis?
     """
     Short-Time Fourier Transform as spectral density estimator. This computes a
     sequence of periodograms, aka the spectrogram.  Optional de-trending,
     tapering, window overlap, padding.
     """
 
-    # @translate(synonymns) # translate keywords
     """
     Compute the spectrogram of a time series. Optional arguments allow for
-    signal de-trending, padding (tapering).
+    signal de-trending, padding, windowing (tapering).
 
     Parameters
     ----------
@@ -605,6 +603,7 @@ class STFT(PowerSpectrumEstimator):
 
     def prepare(self, times, signal, dt, **kws):
         n = len(signal)
+
         nwindow = wdw.resolve.nwindow(self.nwindow, self.split, n, dt)
         noverlap = noverlap = wdw.resolve.overlap(nwindow, self.noverlap, dt)
         self.padding = self.npadded, *_ = resolve_padding(nwindow, dt, self.pad)
@@ -618,17 +617,34 @@ class STFT(PowerSpectrumEstimator):
 
 class Spectrogram(Periodogram):
 
+    estimator = STFT
+    _value_ndim_max = 3
+
+    __repr__ = Represent(['n', 'nwindow'],
+                         maybe=['norm.name'],
+                         remap={'n':         'n_seg',
+                                'norm.name': 'norm'})
+
     def __init__(self, times, frq, power, sigma=None, norm='rms'):
         self.times = times
         super().__init__(frq, power, sigma, norm=norm)
 
     @property
-    def fRayleigh(self):
+    def f_rayleigh(self):
         return 1. / (self.nwindow * self.dt)
 
-    @ftl.cached_property
+    # alias
+    fRayleigh = f_rayleigh
+
+    @MeasurementSequence.index.setter
+    def index(self, index):
+        MeasurementSequence.index.fset(self, index)
+        del self.tmid
+
+    @cached_property
     def tmid(self):
-        # median time for each segment
+        """Median time for each segment."""
+
         d, r = divmod(self.nwindow, 2)
         if r:
             # odd size window
@@ -637,6 +653,66 @@ class Spectrogram(Periodogram):
         return self.times[:, d]
 
     def plot(self):
-        from .tfr import TimeFrequencyRepresentation
-
         return TimeFrequencyRepresentation(self)
+
+
+# ---------------------------------------------------------------------------- #
+
+class Correlogram(MeasurementSequence):
+
+    def __init__(self, max_lag=None, method=None, njobs=-1):
+
+        if method is None:
+            method = 'direct' if np.ma.is_masked(self.x) else 'fft'
+        else:
+            method = str(method).lower()
+
+        assert method in {'fft', 'direct'}
+
+        max_lag = int(max_lag or self.n)
+        lag = self.t[:max_lag] - self.t[0]
+
+        self.logger.info('Computing Auto-correlation spectrum via {} method.',
+                         method)
+        sv = self.normalize()
+
+        if method == 'direct':
+            return type(self)(lag, _acf_direct(sv.x, max_lag, njobs).T)
+
+        # FFT method
+        x = sv.impute(emit='warning').x
+        v = np.ma.empty((self.m, max_lag))
+        for i, x in enumerate(x[(..., *[np.newaxis] * (self.m == 1))].T):
+            c = scipy.signal.correlate(x, x, 'full')
+            v[i] = c[self.n - 1:]
+
+        # normalize
+        norm = np.sum(x ** 2, 0, keepdims=True)
+        return type(self)(lag, (v / norm).T)
+
+
+class ACFDirectCompute(Executor):
+
+    def compute(self, data, index, **kws):
+        i, j = index
+        r = _lag_acor_norm(data[i], j + 1)
+        if not np.ma.is_masked(r):
+            self.results[index] = r
+
+
+def _lag_acor_norm(x, lag):
+    """Lagged autocorrelation for standard normal variable"""
+    n = len(x)
+    return (x[:n - lag] * x[lag:]).sum(0) / n
+
+
+def _acf_direct(x, max_lag, njobs=-1, backend='multiprocessing'):
+
+    x = x[(..., *[np.newaxis] * (x.ndim == 1))].T
+    indices = itt.product(range(len(x)), range(max_lag))
+
+    task = ACFDirectCompute(backend=backend)
+    task.init_memory((len(x), max_lag))
+    task.run(x, indices, njobs)
+
+    return np.ma.MaskedArray(task.results, np.isnan(task.results))
