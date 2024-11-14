@@ -1,23 +1,35 @@
+
 # ---------------------------------------------------------------------------- #
+# 
 io.txt:
-    title:  'Time Series: {}'
-    precision:      6       # for floats. Can also be given per column below
-    # columns [name, unit, description]
+    title:          'Time Series: {}'
+    # Title to be formatted with optional target name. Will appear as the first
+    # line in the header
+    description:    ''
+    # This can be any text and will be printed below the title
+    precision:      6   
+    # for floats. Can also be given per column below
+    
+    # columns 
     columns:
-        index: 
-            title:          Time
-            description:    Time stamp
-            unit:           ''
-        values: 
-            title:          x
-            description:    Data value
-            unit:           ''
-        sigma:   
-            title:          σ
-            description:    Standard deviation uncertainty of data value
-        mask: 
-            title:          mask
-            description:    Censored data
+        title_align:        <
+        sep:                ' |'
+        
+        info:
+            index: 
+                title:          Time
+                description:    Time stamp
+                unit:           ''
+            values: 
+                title:          x
+                description:    Data value
+                unit:           ''
+            sigma:   
+                title:          σ
+                description:    Standard deviation uncertainty of data value
+            mask: 
+                title:          mask
+                description:    Censored data
 
 
 # ---------------------------------------------------------------------------- #

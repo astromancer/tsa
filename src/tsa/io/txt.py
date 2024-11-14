@@ -33,7 +33,7 @@ CONFIG = ConfigNode.load_module(__file__, dot_split=True)
 # write oflag data to file
 REGEX_FORMAT_SPEC = re.compile(r'%[+\- ]?(\d{0,2})\.?(\d{0,2})?([if])')
 
-COLUMN_SPEC = CONFIG.columns.filter('title_align')
+COLUMN_SPEC = CONFIG.columns.info
 COLUMN_INFO_NAME = 'Column Info'
 SHAPE_INFO_NAME = 'Table Info'
 UNIT_FORMAT = '[{}]'
@@ -61,7 +61,7 @@ def read(filename, *_, order=..., **kws):
 
     ncols = int(meta_data[SHAPE_INFO_NAME]['n_cols'])
 
-    flags = [op.index(header, f'# {CONFIG.columns[name].title}',
+    flags = [op.index(header, f'# {CONFIG.columns.info[name].title}',
                       test=str.startswith, default=None)
              for name in ('index', 'sigma', 'mask')]
 
@@ -92,7 +92,7 @@ def read_meta(lines):
     lines = [remove_prefix(line, '# ') for line in lines]
     sections = split_where(lines, '', offset=1)[1:-1]
     for name, _, *info, _ in sections:
-        data[name] = dict(read_block(info))
+        data[name] = read_block(info)
 
     return data
 
@@ -107,9 +107,19 @@ def convert_numeric(string):
 
 
 def read_block(text):
+    buffer = ''
+    data = {}
     for line in text:
-        lhs, rhs = line.split(':', 1)
-        yield lhs, convert_numeric(rhs.strip())
+        if ':' in line:
+            lhs, rhs = line.split(':', 1)
+            data[lhs] = convert_numeric(rhs.strip())
+        else:
+            buffer = '\n'.join((buffer, line))
+
+    if data:
+        return data
+
+    return buffer.lstrip('\n')
 
 
 @api.synonyms(values='value')
@@ -117,7 +127,7 @@ def write(filename, index, values, sigma, mask=None, precision=6,
           sep=CONFIG.columns.sep, title=CONFIG.title, col_info=COLUMN_SPEC,
           target='', series_type='series', **metadata):
     """
-    Write to text file.
+    Write measurement sequence data to text file.
 
     Parameters
     ----------
@@ -173,7 +183,7 @@ def write(filename, index, values, sigma, mask=None, precision=6,
         # get format
         spec = dict(col_info[name])
         unit = spec.get('unit', '')
-        spec['unit'] = UNIT_FORMAT.format(unit) if unit else ''
+        unit = spec['unit'] = UNIT_FORMAT.format(unit) if unit else ''
         spec.pop('description')
 
         # auto format
@@ -194,8 +204,11 @@ def write(filename, index, values, sigma, mask=None, precision=6,
 
     # file header
     col_details = (names, titles, units, widths, head_fmt)
-    header_info = collect_metadata(title, target, shape_info, col_info,
+    description = metadata.pop('description', '')
+    header_info = collect_metadata(title, target, description,
+                                   shape_info, col_info,
                                    series_type, **metadata)
+
     header = format_header(header_info, col_details, target, n_series, sep)
 
     # write to file
@@ -213,10 +226,10 @@ def _auto_format(data, precision, title, unit, comment_size=0):
     dtype = data.dtype.kind
     if np.ma.is_masked(data):
         data = data.compressed()
-        
+
     data = data[~np.isnan(data)]
     assert data.size
-        
+
     mx, mn = data.max(), data.min()
     neg = mn < 0
 
@@ -235,9 +248,9 @@ def _auto_format(data, precision, title, unit, comment_size=0):
     # column format
     cw = max(len(title), len(unit))  # + 1
     dw += neg
-    fuckup = dw >= cw
+    adjust = dw >= cw
     cw = max(dw, cw)
-    if fuckup:
+    if adjust:
         cw -= comment_size
 
     if (space := (cw - dw)) > 0:
@@ -250,7 +263,7 @@ def _auto_format(data, precision, title, unit, comment_size=0):
     return df, cf, cw
 
 
-def collect_metadata(title, target_name, shape_info, col_info,
+def collect_metadata(title, target_name, description, shape_info, col_info,
                      series_type='series', **metadata):
     """
     Make a header for the file.
@@ -293,7 +306,7 @@ def collect_metadata(title, target_name, shape_info, col_info,
 
     return {
         # title, table shape info
-        f'# {title.format(target_name)}': '',
+        f'# {title.format(target_name)}': description,  # .format(target_name)
         SHAPE_INFO_NAME:  shape_info,
         # column descriptions
         COLUMN_INFO_NAME: descriptions,
@@ -319,15 +332,14 @@ def _gen_header_lines(header_info, col_details, target_name, n_series, sep):
     # object names
     n_cols = len(names)
     n_col_per_series = len(set(header_info[COLUMN_INFO_NAME].keys())) - 1
-    gsep = [sep] + ([' ' * len(sep)] * (n_col_per_series - 1) + [sep]) * n_series
+
+    group_widths = np.reshape(widths[1:], (-1, n_col_per_series)).sum(1) + len(sep)
     target_names = [target_name or 'C0', *map('C{}'.format, range(1, n_series))]
+    group_head_line = ' ' * widths[0] + sep
+    for name, width in zip(target_names, group_widths):
+        group_head_line += f'{name: <{width}}{sep}'
 
-    col_group_heads = [' ' * len(sep)] * n_cols
-    for i, j in enumerate(range(1, n_cols, n_col_per_series)):
-        col_group_heads[j] = target_names[i]
-
-    target_names_fmt = ''.join(map(''.join, zip(head_fmt, gsep))).replace('^', '<')
-    yield target_names_fmt.format(*col_group_heads)
+    yield group_head_line
 
     # column titles
     col_head_fmt = sep.join((*head_fmt, ''))

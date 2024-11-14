@@ -47,6 +47,7 @@ class _SupportedFormats(Enum):
 
 
 class SupportedFormats(_SupportedFormats):
+
     TXT = 'txt'
     NPY = 'npy'
     NPZ = 'npz'
@@ -55,6 +56,15 @@ class SupportedFormats(_SupportedFormats):
     # HDF5 = 'hd5'
 
 # ---------------------------------------------------------------------------- #
+
+
+def get_metadata(data, keys):
+    # meta
+    meta = {key: val.item() if val.size == 1 else ''.join(val)
+            for key, val in op.ItemMap(*keys)(data).items()}
+    logger.debug('The following meta data was read: {}.', meta)
+
+    return meta
 
 
 class Reader:
@@ -69,21 +79,20 @@ class Reader:
 
     txt = staticmethod(txt.read)
 
-    def npz(self, filename, fields=('index', 'values', 'sigma')):
+    def npz(self, filename, fields=('index', 'values', 'sigma'), order=...):
 
         data = np.load(filename, allow_pickle=True)
-        out = (index, value, *sigma) = tuple(data.get(field, None) for field in fields)
+        out = (index, value, *sigma) = tuple(data.get(field) for field in fields)
 
-        if (mask := data.get('mask', None)) is not None:
+        if (mask := data.get('mask')) is not None:
             assert len(mask) == len(value)
             mask = mask.astype(bool)
             value = np.ma.MaskedArray(value, mask)
 
-        # meta
-        meta_keys = set(data.keys()) - set(fields)
-        meta = op.ItemMap(*meta_keys)(data)
-        logger.debug('The following meta data was read: {}.', meta)
+        # resolve metadata
+        meta = get_metadata(data, set(data.keys()) - set(fields))
 
+        # if order is not ...:
         return out, meta
 
     def npy(self, filename):
@@ -141,7 +150,7 @@ class Writer:
     def npz(self, filename, index, values, sigma=None, mask=None, **metadata):
 
         # Get namespace, filtering `None` values
-        namespace = sanitize(locals(), 'filename')
+        namespace = sanitize(locals(), 'filename', 'metadata')
         namespace = cofilter(not_none, namespace.values(), namespace.keys())[::-1]
         namespace = dict(zip(*namespace))
 
