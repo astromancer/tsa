@@ -37,6 +37,7 @@ COLUMN_SPEC = CONFIG.columns.info
 COLUMN_INFO_NAME = 'Column Info'
 SHAPE_INFO_NAME = 'Table Info'
 UNIT_FORMAT = '[{}]'
+HEADER_SCAN_LIMIT = 50
 
 # ---------------------------------------------------------------------------- #
 
@@ -56,7 +57,7 @@ def read(filename, *_, order=..., **kws):
         Time stamps, data values, standard deviation uncertainty of data.
     """
 
-    header = read_lines(filename, 35)
+    header = read_lines(filename, HEADER_SCAN_LIMIT)
     meta_data = read_meta(header)
 
     ncols = int(meta_data[SHAPE_INFO_NAME]['n_cols'])
@@ -90,7 +91,10 @@ read_text = read
 def read_meta(lines):
     data = {}
     lines = [remove_prefix(line, '# ') for line in lines]
-    sections = split_where(lines, '', offset=1)[1:-1]
+
+    sections = list(split_where(lines, '', offset=1))
+    sections.remove([''])
+
     for name, _, *info, _ in sections:
         data[name] = read_block(info)
 
