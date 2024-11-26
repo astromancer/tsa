@@ -4,7 +4,7 @@ import numpy as np
 
 # local
 from recipes.array import fold
-from recipes.concurrence import Executor
+from recipes.compute import Executor
 from recipes.oo.represent import Represent
 
 # relative

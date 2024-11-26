@@ -29,7 +29,7 @@ class _SupportedFormats(Enum):
             if member := getattr(cls, ext.upper(), ()):
                 return member
 
-        raise ValueError(f'Unsupported format: .{ext!r}')
+        raise ValueError(f'Unsupported format: ".{ext}"')
 
     @classmethod
     def supported(cls):
@@ -74,7 +74,7 @@ class Reader:
     def __call__(self, filename, **kws):
         logger.info('Loading data from {}.', filename)
         filename = Path(filename)
-        reader = getattr(self, self.supported(filename).value)
+        reader = getattr(self, SupportedFormats(filename).value)
         return reader(filename, **kws)
 
     txt = staticmethod(txt.read)

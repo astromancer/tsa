@@ -43,7 +43,11 @@ def array(window, n=None):
             )
         return window
 
-    raise ValueError(f'Cannot make window from object: {window!r}.')
+    addendum = ''
+    if isinstance(window, int):
+        addendum = f'Did you mean: `nwindow={window}`?'
+    
+    raise ValueError(f'Cannot make window from object: {window!r}. {addendum}')
 
 
 def size(size, n=None, dt=None):
