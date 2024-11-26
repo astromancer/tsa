@@ -4,9 +4,11 @@ Tools for Frequency Spectral Estimation (a.k.a. Fourier Analysis)
 
 
 # std
+import warnings
 import textwrap as txw
 import itertools as itt
-from warnings import warn
+
+from mpl_multitab import MplTabs
 
 # third-party
 import scipy
@@ -16,22 +18,24 @@ import matplotlib.pyplot as plt
 # local
 from recipes import api
 from recipes.array import fold
+from recipes.compute import Executor
 from recipes.config import ConfigNode
 from recipes.functionals import raises
 from recipes.oo.slots import SlotHelper
-from recipes.concurrence import Executor
 from recipes.logging import LoggingMixin
 from recipes.oo.represent import Represent
 from recipes.oo.property import Alias, cached_property
 
 # relative
 from .. import timing, ts, detrend as dtr, window as wdw
+from ..ts.ts import MultiVariate
 from ..ts.ms import MeasurementSequence
 from .tfr import TimeFrequencyRepresentation
 
 
 # ---------------------------------------------------------------------------- #
-#
+# Module config
+
 CONFIG = ConfigNode.load_module(__file__)
 
 NORMS = (None, True, False, 'rms', 'pds', 'leahy', 'leahy density')
@@ -39,16 +43,23 @@ NORMS = (None, True, False, 'rms', 'pds', 'leahy', 'leahy density')
 PADDING = ('constant', 'mean', 'median', 'minimum', 'maximum', 'reflect',
            'symmetric', 'wrap', 'linear_ramp', 'edge')
 
+
 # ---------------------------------------------------------------------------- #
 # TODO: subclass for LS TFR
 #   methods for non-uniform window length??
 #   functions for plotting segments etc...
 #   more unit tests!!!
 
+class NonConstantTimeStepWarning(UserWarning):
+    # Timesteps are not equispaced
+    pass
+
+# ---------------------------------------------------------------------------- #
+
 
 def periodogram(signal, window=None, detrend=None, pad=None, norm=None, dt=1, **kws):
     """
-    Compute FFT power (aka periodogram). optionally normalize and or detrend
+    Compute FFT power (aka periodogram). optionally normalize and or detrend.
     """
     return Periodogram.fit(signal, dt=dt, window=window, detrend=detrend,
                            pad=pad, norm=norm, **kws)
@@ -125,6 +136,16 @@ def _resolve_padding(nwindow, dt, args):
 
 # ---------------------------------------------------------------------------- #
 
+class MultiVariate(MultiVariate):
+
+    def __getitem__(self, key):
+        obj = super().__getitem__(key)
+        # ensure that the estimator attribute is the instance that did the estimate,
+        # as defined in the fit method above,  not the class of the estimator
+        obj.estimator = self.estimator
+        return obj
+
+
 class SpectralEstimator(SlotHelper, LoggingMixin):
     """Base class for spectral density estimators"""
 
@@ -157,7 +178,15 @@ class Spectrum(MeasurementSequence):
         estimator = cls.estimator(**kws)
         sde = cls(*estimator(*args))
         sde.estimator = estimator
+
         return sde
+
+    def __getitem__(self, key):
+        obj = super().__getitem__(key)
+        # ensure that the estimator attribute is the instance that did the estimate,
+        # as defined in the fit method above,  not the class of the estimator
+        obj.estimator = self.estimator
+        return obj
 
 
 # ---------------------------------------------------------------------------- #
@@ -187,7 +216,7 @@ class UniformFFT(SpectralEstimator):
         frq = self.frequencies(times, dt)
 
         # calculate
-        sde = self.compute(segments)
+        sde = self.compute(segments, axis=int(segments.ndim > 1))
 
         return times, segments, frq, sde  # todo sigma
 
@@ -196,13 +225,14 @@ class UniformFFT(SpectralEstimator):
         return frq, sde
 
     def frequencies(self, times, dt):
-        return np.fft.rfftfreq(len(times), dt)
+        return np.fft.rfftfreq(times.shape[-1], dt)
 
-    def compute(self, signal):
-        return scipy.fft.rfft(signal, axis=0, workers=-1)
+    def compute(self, signal, axis=0):
+        return scipy.fft.rfft(signal, axis=axis, workers=-1)
 
     def _check_input(self, times, signal, dt=None):
-        emit = warn
+        # emit = Emit(NonConstantTimeStepWarning)
+        emit = warnings.warn
         if np.ma.is_masked(signal):
             msg = (
                 'Your signal contains masked data points. FFT-based spectral '
@@ -216,9 +246,8 @@ class UniformFFT(SpectralEstimator):
                 emit = raises(ValueError)
                 msg += (
                     ' If you wish to proceed with the assumption of constant '
-                    'timesteps, pass `strict = False`.\nThis'
-                    ' message will then be emitted as a warning instead of '
-                    'raising an exception.'
+                    'timesteps, pass `strict = False`.\nThis message will then '
+                    'be emitted as a warning instead of raising an exception.'
                 )
             #
             emit(msg)
@@ -232,9 +261,9 @@ class UniformFFT(SpectralEstimator):
 
             dt, _, msg = timing.summary(times)
             if msg:
-                emit(f'Your timestamp array contains {msg}. The FFT-based '
-                     f'methods is not applicable for time series with non-'
-                     f'constant time steps.')
+                emit(f'Your timestamp array contains {msg}. The FFT-based'
+                     ' methods is not applicable for time series with'
+                     ' non-constant time steps.')
         elif not dt:
             # no timestamps
             raise ValueError(txw.dedent(
@@ -307,9 +336,8 @@ class Normalizer:
     def __repr__(self):
         extra = ''
         if self.sde and self.name:
-            extra = (
-                f', scale={self.scale}'
-                f', unit={self.POWER_UNITS.get(self.name, "")}')
+            extra = (f', scale={self.scale}'
+                     f', unit={self.POWER_UNITS.get(self.name, "")}')
 
         return f'{type(self).__name__}({self.name}{extra})'
 
@@ -331,7 +359,10 @@ class Normalizer:
 
         # total time (in window): T = nwindow * dt  # frequency step is 1/T
         T = self.sde.T
-        total = np.sqrt(self.sde.value[0])  # parceval
+        # signal total is DC component: parceval
+        s = [slice(None) for _ in range(self.sde.ndim)]
+        s[self.sde._base_object_dimensions - 1] = [0]
+        total = np.sqrt(self.sde.value[tuple(s)])
 
         if self.name == 'pds':
             return T
@@ -366,7 +397,6 @@ class PowerSpectrum(Spectrum):
     def __init__(self, frq, power, sigma=None, /, norm=False):
         super().__init__(frq, power, sigma)
         self.norm = norm
-
 
     @classmethod
     def fit(cls, *args, norm=None, **kws):
@@ -406,6 +436,9 @@ class PowerSpectrum(Spectrum):
         Size of analysis window on signal. This is equal to the size of the 
         original signal for estimators that don't employ windowing.
         """
+        if nwindow := getattr(self.estimator, 'nwindow'):
+            return nwindow
+
         return round((1. / self.f_nyquist) * (len(self.frq) - 1))
 
     @property
@@ -516,10 +549,9 @@ class PowerSpectrumEstimator(UniformFFT):
         # apply windowing
         return super().prepare(times, wdw.product(signal, self.window))
 
-    def compute(self, signal):
+    def compute(self, signal, axis=0):
         # compute spectral power
-
-        power = np.square(np.abs(super().compute(signal)))
+        power = np.square(np.abs(super().compute(signal, axis)))
 
         # NOTE: We normalise the fft such that Parceval's theorem holds true.
         # The factor 2 below comes from the fact that the signal is real
@@ -528,7 +560,9 @@ class PowerSpectrumEstimator(UniformFFT):
         # even number of frequencies, the last point (which is the unpaired
         # Nyquist frequency)
         nwindow, *_ = signal.shape
-        power[1:(-1, None)[nwindow % 2]] *= 2
+        s = [slice(None) for _ in range(power.ndim)]
+        s[axis] = np.s_[1:(-1, None)[nwindow % 2]]
+        power[tuple(s)] *= 2
         # can check Parceval's theorem here
         return power
 
@@ -536,6 +570,13 @@ class PowerSpectrumEstimator(UniformFFT):
 class Periodogram(PowerSpectrum):
 
     estimator = PowerSpectrumEstimator
+
+
+class MultiVariatePeriodogram(MultiVariate, Periodogram):
+    pass
+
+
+MultiPeriodogram = MultiVariatePeriodogram
 
 
 # ---------------------------------------------------------------------------- #
@@ -590,9 +631,18 @@ class STFT(PowerSpectrumEstimator):
     >>>
     """
 
+    __slots__ = ('nwindow', 'noverlap', 'split', 'padding', 'npadded')
+
+    __repr__ = Represent(['nwindow', 'noverlap'])
+
+    # snake case aliases
+    n_overlap = Alias('noverlap')
+
+    @api.synonyms(overlap='noverlap')
     def __init__(self, nwindow=None, noverlap=0, *args, split=None, **kws):
         kws.setdefault('window', 'hanning')
         super().__init__(*args, **kws)
+
         self.nwindow = nwindow
         self.noverlap = noverlap
         self.split = split
@@ -600,6 +650,10 @@ class STFT(PowerSpectrumEstimator):
     def fit(self, *args, **kws):
         time, seg, frq, sde = self._fit(*args, **kws)
         return time, frq, sde
+
+    def compute(self, signal, axis=1):
+        # compute spectral power
+        return super().compute(signal, axis)
 
     def prepare(self, times, signal, dt, **kws):
         n = len(signal)
@@ -618,16 +672,39 @@ class STFT(PowerSpectrumEstimator):
 class Spectrogram(Periodogram):
 
     estimator = STFT
-    _value_ndim_max = 3
 
-    __repr__ = Represent(['n', 'nwindow'],
-                         maybe=['norm.name'],
-                         remap={'n':         'n_seg',
-                                'norm.name': 'norm'})
+    _base_object_dimensions = 2
+
+    __repr__ = Represent(['nsegments', 'npoints'],
+                         maybe=['noverlap', 'norm.name'],
+                         rename={'n':         'n_seg',
+                                 'norm.name': 'norm'})
+
+    n_window = nwindow = Alias('estimator.nwindow')
+    n_overlap = noverlap = Alias('estimator.noverlap')
+    n_segments = Alias('nsegments')
+
+    # def __new__(cls, times, frq, power, sigma=None, norm='rms'):
+    #     obj = super().__new__(cls, times, frq, power, sigma)
+    #     from IPython import embed
+    #     embed(header="Embedded interpreter at 'src/tsa/spectral/core.py':662")
 
     def __init__(self, times, frq, power, sigma=None, norm='rms'):
         self.times = times
         super().__init__(frq, power, sigma, norm=norm)
+
+    @classmethod
+    def _parse_init_args(cls, times, index, value=None, sigma=None):
+        return times, *super()._parse_init_args(index, value, sigma)
+
+    @property
+    def npoints(self):
+        """Number of data points."""
+        return self.values.shape[1]
+
+    @property
+    def nsegments(self):
+        return self.values.shape[0]
 
     @property
     def f_rayleigh(self):
@@ -652,8 +729,62 @@ class Spectrogram(Periodogram):
 
         return self.times[:, d]
 
+    # @property
+    # def ts(self):
+    #     # reconstruct the time series
+
     def plot(self):
         return TimeFrequencyRepresentation(self)
+
+
+class MultiVariateSpectrogram(MultiVariate, Spectrogram):
+
+    __repr__ = Represent.like(Spectrogram, attrs=[..., 'nvariates'],
+                              maybe=['noverlap', 'norm.name'])
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            key = (..., key)
+
+        if not isinstance(key, tuple):
+            return super().__getitem__(key)
+
+        # select variate
+        key, m = key
+        data = self.value[key, m]
+        dv, dd = self.values.ndim, data.ndim
+        if dd == dv:
+            kls = type(self)
+        elif dd == dv - 1:
+            kls = self.univariate
+        else:
+            kls = tuple
+
+        if kls and isinstance(kls, type):
+            obj = kls(self.times,
+                      None if self.index is None else self.index[key],
+                      data,
+                      None if self.sigma is None else self.sigma[key, m])
+            if kls is not tuple:
+                obj.estimator = self.estimator
+            return obj
+
+        raise TypeError(
+            f'Invalid univariate class {kls.__name__} for multivariate '
+            f'{type(self).__name__}.'
+        )
+
+    def plot(self):
+        maps = []
+        ui = MplTabs(title=type(self).__name__)
+        for i in range(self.n_variates):
+            maps.append(tfr := TimeFrequencyRepresentation(self[i]))
+            ui.add_tab(str(i), tfr.figure)
+
+        return ui, maps
+
+
+MulitSpectrogram = MultiVariateSpectrogram
 
 
 # ---------------------------------------------------------------------------- #

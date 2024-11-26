@@ -5,7 +5,6 @@ uncertainties. Base for `TimeSeries` and `SpectralEstimate` classes.
 
 
 # std
-import warnings
 import numbers as nr
 import operator as op
 
@@ -14,6 +13,7 @@ import numpy as np
 from loguru import logger
 
 # local
+from recipes import api
 from recipes.oo import slots
 from recipes.flow import Emit
 from recipes.logging import LoggingMixin
@@ -91,11 +91,18 @@ class MultiVariate:
 
     univariate = UnivariateDescriptor(None)
 
-    __repr__ = slots.Represent(['n', 'm'], enclose='')
+    __repr__ = slots.Represent(['npoints', 'nvariates'], enclose='')
 
     def __init_subclass__(cls):
+        bases = set(cls.__bases__) - {MultiVariate}
+
+        if not bases:
+            # direct inheritance of MultiVariate class. OK
+            return
+
         for parent in set(cls.__bases__) - {MultiVariate}:
             if issubclass(parent, MeasurementSequence):
+                # multiple inheritance, require univariate base class
                 cls.univariate = parent
                 parent.multivariate = cls
                 return
@@ -112,7 +119,13 @@ class MultiVariate:
         # select variate
         key, m = key
         data = self.value[key, m]
-        kls = self.univariate if len(data) else tuple
+        dv, dd = self.values.ndim, data.ndim
+        if dd == dv:
+            kls = type(self)
+        elif dd == dv - 1:
+            kls = self.univariate
+        else:
+            kls = tuple
 
         if kls and isinstance(kls, type):
             return kls(None if self.index is None else self.index[key],
@@ -120,8 +133,9 @@ class MultiVariate:
                        None if self.sigma is None else self.sigma[key, m])
 
         raise TypeError(
-            f'Invlaid univariate class {kls.__name__} for multivariate '
-            f'{type(self).__name__}.')
+            f'Invalid univariate class {kls.__name__} for multivariate '
+            f'{type(self).__name__}.'
+        )
 
 
 # ---------------------------------------------------------------------------- #
@@ -132,7 +146,10 @@ class MeasurementSequence(LoggingMixin):
     Base class for `TimeSeries` and `SpectralEstimate` classes.
     """
 
-    __repr__ = slots.Represent(['n'], enclose='')
+    __repr__ = slots.Represent(['n_points'], enclose='')
+
+    # expected dimensionality of value array for univariate data
+    _base_object_dimensions = 1
 
     # ------------------------------------------------------------------------ #
     # Constructors
@@ -141,28 +158,32 @@ class MeasurementSequence(LoggingMixin):
     # def fromfile(cls, filename):
 
     def __new__(cls, *args, **kws):
-        index, values, sigma = cls._parse_init_args(*args)
+        *params, values, sigma = cls._parse_init_args(*args)
 
-        if np.squeeze(values).ndim > 1:
+        if (nd := np.squeeze(values).ndim) > cls._base_object_dimensions:
+            cls.logger.debug(
+                'Creating multivariate object {!r}, since data dimensions ({}) '
+                'larger than base object dimensions ({}).',
+                cls.multivariate.__name__, nd, cls._base_object_dimensions
+            )
             obj = super().__new__(cls.multivariate)
             # NOTE: init will not run automatically since this returns an object
             # of a different class
-            cls.__init__(obj, index, values, sigma)
+            cls.__init__(obj, *params, values, sigma)
             return obj
 
         return super().__new__(cls)
 
     # ------------------------------------------------------------------------ #
-    def __init__(self, *args, **metadata):
+    def __init__(self, index, value=None, sigma=None, **metadata):
         """
-        Create a TimeSeries object.
+        Create a MeasurementSequence object.
 
         Examples
         --------
-        >>> TimeSeries(np.random.randn(100))
+        >>> MeasurementSequence(np.random.randn(100))
 
         """
-        index, value, sigma = self._parse_init_args(*args)
 
         # times
         self._index = self._value = self._sigma = None
@@ -171,8 +192,8 @@ class MeasurementSequence(LoggingMixin):
         self.sigma = sigma
         self.metadata = metadata
 
-    @staticmethod
-    def _parse_init_args(index, value=None, sigma=None):
+    @classmethod
+    def _parse_init_args(cls, index, value=None, sigma=None):
         if value is None:
             # signals only
             value = index
@@ -203,6 +224,11 @@ class MeasurementSequence(LoggingMixin):
     save = Alias('write')
     values = Alias('value')
 
+    normalise = Alias('norlamize')
+
+    n = n_points = Alias('npoints')
+    m = n_variates = Alias('nvariates')
+
     # Time
     # ------------------------------------------------------------------------ #
     @property
@@ -221,8 +247,6 @@ class MeasurementSequence(LoggingMixin):
 
     # Data
     # ------------------------------------------------------------------------ #
-    _value_ndim_max = 2
-
     @property
     def value(self):
         return self._value
@@ -239,11 +263,11 @@ class MeasurementSequence(LoggingMixin):
     def _check_array(self, array):
         # make sure we have masked array
         array = np.ma.array(array, ndmin=2)
-
-        if array.ndim > self._value_ndim_max:
+        ndmax = self._base_object_dimensions + 1
+        if array.ndim > ndmax:
             raise ValueError(
                 f'{type(self).__name__} data should be at most '
-                f'{self._value_ndim_max}-dimensional not {array.ndim}D.'
+                f'{ndmax}-dimensional not {array.ndim}D.'
             )
 
         # make sure variate index in last position
@@ -254,14 +278,17 @@ class MeasurementSequence(LoggingMixin):
 
     def _check_against_value(self, array, name):
 
-        n = len(self)
         m = len(array)
-        if m != n:
+        if m not in (shape := self.values.shape):
             raise ValueError(
-                f'Unequal number of points between data ({n=}) and {name} '
-                f'({m=}) arrays.'
+                f'Unequal number of points between data ({shape=}) and {name} '
+                f' arrays {array.shape}.'
             )
 
+    @property
+    def ndim(self):
+        return self.values.ndim
+    
     # Uncertainty
     # ------------------------------------------------------------------------ #
     @property
@@ -288,14 +315,14 @@ class MeasurementSequence(LoggingMixin):
 
     # ------------------------------------------------------------------------ #
     @property
-    def n(self):
+    def npoints(self):
         """Number of data points."""
         return len(self)
 
     @property
-    def m(self):
+    def nvariates(self):
         """Number of variates (time series)."""
-        return self._value.shape[1]
+        return self._value.shape[-1]
 
     # ------------------------------------------------------------------------ #
     def __getitem__(self, key):
@@ -352,8 +379,16 @@ class MeasurementSequence(LoggingMixin):
                 raise ValueError(f'Arithmetic on {self.__class__} objects with'
                                  f' different sizes not permitted')
 
-            # TODO: propagate uncertainties!
-            return self.__class__(self.index, operator(self.value, other.x), self.sigma)
+            #  propagate uncertainties!
+
+            if operator in {op.add, op.sub}:
+                sigma = np.sqrt(self.sigma ** 2 + other.sigma ** 2)
+            elif operator in {op.mul, op.truediv}:
+                # assuming uncorrellated
+                sigma = (self.value * other.value) * np.sqrt(
+                    (self.sigma / self.value) ** 2 + (other.sigma / other.value) ** 2)
+
+            return self.__class__(self.index, operator(self.value, other.value), sigma)
 
         # arithmetic with complex numbers not supported
         if isinstance(other, nr.Complex) and not isinstance(other, nr.Real):
@@ -363,8 +398,13 @@ class MeasurementSequence(LoggingMixin):
 
         # array-like (any object that can create an array / any duck-type array)
         other = np.asanyarray(other)
-        warnings.warn('Uncertainties not propagated!')
-        return self.__class__(self.index, operator(self.value, other), self.sigma)
+        #  propagate uncertainties!
+        sigma = self.sigma
+        if operator in {op.mul, op.truediv}:
+            # assuming uncorrellated
+            sigma = operator(self.sigma, other)
+
+        return self.__class__(self.index, operator(self.value, other), sigma)
 
     # element-wise comparison
     # object.__lt__(self, other)
@@ -453,17 +493,29 @@ class MeasurementSequence(LoggingMixin):
         if isinstance(other, tuple):
             other = type(self)(*other)
 
-        self.value = np.hstack([self.value, other.value])
+        self.value = np.vstack([self.value, other.value])
 
         if self.index is not None:
             self.index = np.hstack([self.index, other.index])
 
         if self.sigma is not None:
-            self.sigma = np.hstack([self.sigma, other.sigmau])
+            self.sigma = np.vstack([self.sigma, other.sigma])
+
+    def stack(self, others):
+        value = np.vstack([self.value, *(o.value for o in others)])
+
+        if (index := self.index) is not None:
+            index = np.hstack([self.index, *(o.index for o in others)])
+
+        if (sigma := self.sigma) is not None:
+            sigma = np.vstack([self.sigma, *(o.sigma for o in others)])
+
+        return type(self)(index, value, sigma)
 
     # Transformations
     # ------------------------------------------------------------------------ #
-
+    @api.synonyms({'t0': 'start',
+                   't(ime_)?scale': 'scale_index'})
     def normalize(self, loc='mean', scale='std', start=None, scale_index='ptp'):
 
         y = self.value
