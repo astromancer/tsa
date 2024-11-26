@@ -219,10 +219,10 @@ def get_data(data, labels, thin=1, max_points=None, t0=None, tscale=None):
 
     # parse input args: times, signals, y_err, x_err
     data = resolve_data(data, labels)
-    
+
     # zip_longest in case errors or times are empty sequences
     data = itt.zip_longest(*data, fillvalue=())
-    
+
     # performance tradeoff: thin data since plotting many point is a bottleneck
     data = _thin_data(data, thin, max_points)
 
@@ -321,7 +321,7 @@ def _thin_data(data, thin, max_points):
 
     if not max_points and (thin != 1):
         logger.debug('Thinning plot data by {}.', thin)
-    
+
     for *vectors, label in data:
         yield (*_thinner(thin, *vectors), label)
 
@@ -468,7 +468,7 @@ class TimeSeriesPlot(Interface):
     # TODO: evolve to multiprocessed TS plotter.
 
     figure = Alias('fig')
-    
+
     def __init__(self, title='', hist=(), plims=CONFIG.axes.plims,
                  colors=None, cmap=None, max_points=1e4, **kws):
 
@@ -640,7 +640,7 @@ class TimeSeriesPlot(Interface):
 
         return fig, ax, hax
 
-    def plot(self, x, y, y_err, x_err, label=None, #thin=1,
+    def plot(self, x, y, y_err, x_err, label=None,  # thin=1,
              show_masked=False, show_hist=False, relative_time=False,
              styles=None, **kws):
 
@@ -659,6 +659,7 @@ class TimeSeriesPlot(Interface):
         if len(y_err) or len(x_err):
             # plot errorbars
             art = self.ax.errorbar(*data, **{**kws, **styles.errorbar})
+
         else:
             # plot line
             art = self.ax.plot(*data[:2], **{**kws, **styles.line})

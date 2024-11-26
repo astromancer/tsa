@@ -199,10 +199,14 @@ class TimeSeries(MeasurementSequence):
                     pad=None, split=None, norm=False, **kws):
         from tsa.spectral import Spectrogram
 
-        return Spectrogram.fit(self.t, self.x,
+        sg = Spectrogram.fit(self.t, self.x,
                                nwindow=nwindow, noverlap=noverlap,
                                window=window, detrend=detrend,
                                pad=pad, split=split, norm=norm, **kws)
+        # HACK
+        sg._ts = self
+        return sg
+        
 
     def correlogram(self, max_lag=None, method=None, njobs=-1):
         from tsa.spectral import Correlogram

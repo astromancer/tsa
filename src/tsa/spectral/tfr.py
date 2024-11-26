@@ -16,6 +16,7 @@ from matplotlib.transforms import blended_transform_factory as btf
 from recipes.containers.dicts import AttrDict, AttrReadItem
 from scrawl.ticks import ReciprocalFormatter
 from scrawl.moves import CallbackManager, mpl_connect
+from recipes.iter import first_false_index
 
 # relative
 from ..smooth import smooth
@@ -67,15 +68,17 @@ class TimeFrequencyBase:
         """ """
         # assert isinstance(spectrogram, Spectrogram)
         self.spec = spectrogram
-
-        ts_config = {**CONFIG.ts, **(ts if isinstance(ts, dict) else {})}
-        sde_config = {**CONFIG.sde, **(pg if isinstance(pg, dict) else {})}
+        cfg = CONFIG.select(('ts', 'sde')).prune('axes')
+        ts_config = {**cfg.ts, **(ts if isinstance(ts, dict) else {})}
+        sde_config = {**cfg.sde.prune('color_cycle'),
+                      **(pg if isinstance(pg, dict) else {})}
 
         # cmap = plt.get_cmap(cmap)
         self.q_levels = np.array(percentiles)
         self.figure, axes = self.setup_figure(bool(ts), bool(pg), bool(info))
         self.axes = AxesContainer(axes)
         self.info_text = self.get_info_text() if info else None
+        self.cb_props = {}
 
         art = self.plot(cmap, ts_config, sde_config)
         self.art = ArtistContainer(art)
@@ -176,7 +179,7 @@ class TimeFrequencyBase:
     def plot(self, cmap, ts_config=(), sde_config=()):
 
         spec = self.spec
-        frq, pwr = spec.frq, spec.power
+        frq, pwr = spec.frq, spec.values
         valid = frq > spec.f_rayleigh
         # NOTE: we intentionally do not mask power values below f_rayleigh, even
         # though they are not physicaly meaningful because this often leads to
@@ -191,9 +194,15 @@ class TimeFrequencyBase:
         art = AttrDict()
 
         # Plot TFR image
-        tlims = spec._ts.t[[0, -1]]
+        t0 = spec.times[0, 0]
+        t1 = spec.times[-1, -1]
+        if t1 is np.ma.masked:
+            t1 = spec.times[-1, -first_false_index(spec.times[-1].mask[::-1]) - 1]
+
+        tlims = [t0, t1]
         flims = frq[[0, -1]]
         extent = np.r_[tlims, flims]
+
         art.image = image = mimage.NonUniformImage(self.axes.map,
                                                    origin='lower',
                                                    extent=extent,
@@ -224,16 +233,16 @@ class TimeFrequencyBase:
 
         if self.axes.ts:
             # Plot time series
-            tsp = spec._ts.plot(self.axes.ts,
+            tsp = spec._ts.plot(ax=self.axes.ts,
                                 # FIXME: use DEFAULT values
-                                plims=[(0, 100), (-1, 101)],
+                                # plims=[(0, 100), (-1, 101)],
                                 errorbar=(ts_config or {}))
             self.axes.ts.xaxis.set_label_position('top')
 
         if self.axes.spec:
             self.plot_pgram(sde_config, clim=clim)
 
-            # show colourbar
+            # show colour bar
             tmp = self.axes.cbar.get_xlabel()
             art.cbar = self.figure.colorbar(image,
                                             ticks=self.axes.spec.get_xticks(),
@@ -280,7 +289,7 @@ class TimeFrequencyBase:
         # ax.set_xscale('log')
 
         # hatch anything below `self.f_rayleigh`
-        rinv = Rectangle((0, 0), 1, self.spec.f_rayleigh,
+        rinv = Rectangle((0, 0), 1, float(self.spec.f_rayleigh),
                          transform=btf(ax.transAxes,
                                        ax.transData),
                          **CONFIG.hatch)
@@ -338,7 +347,7 @@ class TimeFrequencyBase:
 
     def format_coord_map(self, x, y):
         pwr = self.spec.power
-        frac = np.divide((x, y), (self.spec._ts.t[-1], self.spec.frq[-1]))
+        frac = np.divide((x, y), (self.spec.times[-1], self.spec.frq[-1]))
         col, row = np.round(frac * pwr.shape, 0).astype(int)
         nrows, ncols = pwr.shape
         if (0 < col < ncols) and (0 < row < nrows):
