@@ -64,9 +64,9 @@ def summary(t, rtol=1e-5, atol=1e-8):
     if len(unqdt) > 5:
         info = f'{len(unqdt)} unique values between {deltas.min(), deltas.max()}'
     else:
-        info = str(unqdt)
+        info = np.array2string(unqdt, precision=-int(np.log10(rtol).round()))
 
-    return dt, unqdt, f'Non-constant time steps: {info}'
+    return dt, unqdt, f'non-constant time steps: {info}'
 
 
 def detect_gaps(t, kct=None, ltol=1.9, utol=np.inf, tolerance='relative'):
