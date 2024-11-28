@@ -6,10 +6,15 @@ import numpy as np
 
 # relative
 from .. import window as wdw
-from . import tv
+from . import tvr
+
+
+#alias
+tv = tvr
 
 
 # ---------------------------------------------------------------------------- #
+
 class KernelSmoother:
 
     def __init__(self, window='hanning', size=11):

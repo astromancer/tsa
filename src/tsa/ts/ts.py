@@ -9,7 +9,7 @@ import numpy as np
 from recipes.oo.property import Alias
 
 # relative
-from ..smooth import KernelSmoother, tv
+from ..smooth import KernelSmoother, tvr
 from .interface import Interface
 from .plotting import TimeSeriesPlot
 from .ms import MeasurementSequence, MultiVariate
@@ -91,10 +91,12 @@ from .ms import MeasurementSequence, MultiVariate
 # ---------------------------------------------------------------------------- #
 class Smoothing(Interface):
 
+    tv = Alias('tvr')
+    
     def __call__(self, x, wsize=11, window='hanning'):
         return KernelSmoother(window, wsize)(x)
 
-    def tv(self, smoothing=None, nwindow=None, noverlap=0, λ0=1, njobs=-1, **kws):
+    def tvr(self, smoothing=None, nwindow=None, noverlap=0, λ0=1, njobs=-1, **kws):
 
         t, x, u = self.get_data(())
         # x = x[(..., *[np.newaxis] * (x.ndim == 1))].T
@@ -102,13 +104,13 @@ class Smoothing(Interface):
 
         if nwindow:
             njobs = (njobs, )
-            smoother = tv.MovingWindowSmoother(nwindow, noverlap, **kws)
-            name = 'tv.MovingWindowSmoother'
+            smoother = tvr.MovingWindowSmoother(nwindow, noverlap, **kws)
+            name = 'tvr.MovingWindowSmoother'
         else:
             # no windowing. might bork for long ts
             njobs = ()
-            smoother = tv.smooth
-            name = 'tv.smooth'
+            smoother = tvr.smooth
+            name = 'tvr.smooth'
 
         if (m := x.shape[1]) > 1:
             self.logger.debug('Looping over {} variates.', m)
